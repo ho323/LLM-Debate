@@ -4,25 +4,21 @@ from .base_agent import BaseAgent
 class ModeratorAgent(BaseAgent):
     def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
         super().__init__(model_name)
-        self.system_prompt = """
-너는 공정하고 중립적인 토론 사회자입니다.
-- 양측의 의견을 객관적으로 정리합니다
-- 토론의 흐름을 관리하고 다음 논점을 제시합니다
-- 감정적인 표현은 피하고 사실에 기반해 진행합니다
-- 양측 모두에게 발언 기회를 공평하게 제공합니다
-"""
+        self.system_prompt = """너는 간결하고 중립적인 토론 사회자다. 짧고 명확하게 진행하라."""
+        self.factcheck_prompt = """너는 팩트체커다. 발언의 사실성을 간단히 판단하라. O(사실) 또는 X(거짓/과장)로만 답하라."""
 
     def process_input(self, input_data: Dict) -> str:
         action = input_data.get('action', '')
         topic = input_data.get('topic', '')
         statements = input_data.get('statements', [])
+        statement_to_check = input_data.get('statement_to_check', '')
         
         if action == 'introduce':
             return self._introduce_debate(topic)
-        elif action == 'moderate':
-            return self._moderate_discussion(topic, statements)
         elif action == 'conclude':
-            return self._conclude_round(statements)
+            return self._conclude_debate(statements)
+        elif action == 'factcheck':
+            return self._factcheck_statement(statement_to_check)
         else:
             return "사회자 역할을 수행할 수 없습니다."
     
@@ -31,45 +27,50 @@ class ModeratorAgent(BaseAgent):
 
 토론 주제: {topic}
 
-위 주제에 대한 토론을 시작합니다. 주제를 소개하고 토론의 진행 방식을 안내해주세요.
-양측이 공정하게 의견을 개진할 수 있도록 중립적으로 진행하겠습니다.
+토론을 시작한다. 주제를 간단히 소개하고 진보 vs 보수 토론 시작을 선언하라.
+1-2문장으로 간결하게.
 
 사회자:"""
         
-        return self.generate_response(prompt)
+        return self.generate_response(prompt, max_length=80)
     
-    def _moderate_discussion(self, topic: str, statements: List[Dict]) -> str:
-        statements_text = ""
-        for i, stmt in enumerate(statements[-2:]):  # 최근 2개 발언만
-            statements_text += f"{stmt['stance']}: {stmt['content']}\n\n"
+    def _conclude_debate(self, statements: List[Dict]) -> str:
+        # 양측 주장 요약
+        progressive_count = len([s for s in statements if s.get('stance') == '진보'])
+        conservative_count = len([s for s in statements if s.get('stance') == '보수'])
         
         prompt = f"""{self.system_prompt}
 
-토론 주제: {topic}
+토론이 끝났다. 진보 측 {progressive_count}회, 보수 측 {conservative_count}회 발언했다.
 
-최근 발언들:
-{statements_text}
-
-위 발언들을 바탕으로 토론의 흐름을 정리하고, 다음 논점이나 질문을 제시해주세요.
-양측의 핵심 주장을 간단히 요약하고 토론을 이어나가도록 유도해주세요.
+토론 종료를 선언하고 양측의 열띤 토론에 감사 인사를 전하라.
+1-2문장으로 간결하게.
 
 사회자:"""
         
-        return self.generate_response(prompt)
+        return self.generate_response(prompt, max_length=80)
     
-    def _conclude_round(self, statements: List[Dict]) -> str:
-        statements_text = ""
-        for stmt in statements:
-            statements_text += f"{stmt['stance']}: {stmt['content']}\n\n"
+    def _factcheck_statement(self, statement: str) -> str:
+        """발언에 대한 간단한 팩트체크를 수행합니다."""
+        if not statement:
+            return "X"
+            
+        prompt = f"""{self.factcheck_prompt}
+
+발언: "{statement}"
+
+이 발언이 일반적으로 알려진 사실에 부합하는가?
+- 명백한 사실이거나 합리적 주장이면: O
+- 명백히 틀렸거나 과장이면: X
+
+답변: """
         
-        prompt = f"""{self.system_prompt}
-
-이번 라운드의 주요 발언들:
-{statements_text}
-
-이번 토론 라운드를 마무리하며 양측의 핵심 주장을 간단히 정리해주세요.
-다음 토론 주제나 마무리 멘트를 제시해주세요.
-
-사회자:"""
+        response = self.generate_response(prompt, max_length=10)
         
-        return self.generate_response(prompt) 
+        # O/X만 추출
+        if 'O' in response.upper():
+            return 'O'
+        elif 'X' in response.upper():
+            return 'X'
+        else:
+            return 'O'  # 기본값 
