@@ -48,7 +48,7 @@ python main.py --topic "부동산 규제 정책의 효과성" --rounds 5
 python main.py --interactive
 ```
 
-## 📋 사용법
+## 사용법
 
 ### 자동 모드
 - 지정된 주제로 전체 토론을 자동 진행
