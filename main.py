@@ -5,9 +5,37 @@
 """
 
 import sys
+import os
 import argparse
 from typing import Dict, List
+from datetime import datetime
+import json
 from debate_manager import DebateManager
+
+def ensure_results_dir():
+    """결과 저장 디렉토리를 생성합니다."""
+    results_dir = os.path.join(os.getcwd(), 'debate_results')
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    return results_dir
+
+def save_debate_results(results: Dict, topic: str):
+    """토론 결과를 debate_results 폴더에 저장합니다."""
+    # 결과 저장 디렉토리 확인/생성
+    results_dir = ensure_results_dir()
+    
+    # 파일명 생성 (주제_날짜시간.json)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    topic_slug = topic.replace(" ", "_")[:30]  # 주제를 파일명에 적합하게 변환
+    filename = f"{topic_slug}_{timestamp}.json"
+    filepath = os.path.join(results_dir, filename)
+    
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        print(f"결과가 저장되었습니다: {filepath}")
+    except Exception as e:
+        print(f"파일 저장 중 오류 발생: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='AI 정치 토론 시스템 (진보 vs 보수 + 팩트체크)')
@@ -25,6 +53,9 @@ def main():
     args = parser.parse_args()
     
     try:
+        # 결과 저장 디렉토리 초기화
+        ensure_results_dir()
+        
         # 토론 관리자 초기화
         debate_manager = DebateManager(model_name=args.model)
         debate_manager.max_rounds = args.rounds
@@ -140,23 +171,9 @@ def show_help():
   3. conclude 명령어로 토론 마무리
   
 각 발언 후 자동으로 O/X 팩트체크가 진행됩니다.
+토론 결과는 'debate_results' 폴더에 저장됩니다.
 """
     print(help_text)
-
-def save_debate_results(results: Dict, topic: str):
-    """토론 결과를 파일로 저장"""
-    import json
-    from datetime import datetime
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"debate_result_{timestamp}.json"
-    
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"결과가 {filename}에 저장되었습니다.")
-    except Exception as e:
-        print(f"파일 저장 중 오류 발생: {e}")
 
 if __name__ == "__main__":
     print("🎭 진보 vs 보수 AI 토론 시스템에 오신 것을 환영합니다!")
