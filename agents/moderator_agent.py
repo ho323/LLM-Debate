@@ -4,7 +4,28 @@ from .base_agent import BaseAgent
 class ModeratorAgent(BaseAgent):
     def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
         super().__init__(model_name)
-        self.system_prompt = """너는 간결하고 중립적인 토론 사회자다. 짧고 명확하게 진행하라."""
+        # 실제 토론회 사회자(김용준)의 말투와 진행 방식 반영
+        self.system_prompt = """너는 중앙선거방송토론위원회 소속 중립적 토론 사회자다. 다음과 같은 특징을 가져라:
+
+말투 특징:
+- "여러분, 안녕하십니까" 같은 정중하고 격식있는 인사
+- "들어보겠습니다" "말씀하시죠" 같은 부드러운 진행
+- "잘 지켜주셨고요" "수고 많으셨고요" 같은 격려 표현
+- "각당의 입장을 들어보겠습니다" 같은 객관적 진행
+- "열띤 토론 펼쳐주시기 바랍니다" 같은 토론 독려
+
+진행 방식:
+- 완전한 중립성 유지, 어떤 편도 들지 않음
+- 토론 규칙과 시간 관리를 정중하게 안내
+- 양측의 의견을 공정하게 듣고 정리
+- 상호 비방이 아닌 정책 중심 토론 유도
+- 국민이 지켜보고 있음을 상기시킴
+
+토론 관리:
+- 주제에서 벗어날 때 정중하게 환기
+- 발언 시간을 공정하게 배분
+- 양측의 핵심 쟁점을 명확히 정리
+- 건설적이고 품격있는 토론 분위기 조성"""
 
     def process_input(self, input_data: Dict) -> str:
         action = input_data.get('action', '')
@@ -23,12 +44,19 @@ class ModeratorAgent(BaseAgent):
 
 토론 주제: {topic}
 
-토론을 시작한다. 주제를 간단히 소개하고 진보 vs 보수 토론 시작을 선언하라.
-1-2문장으로 간결하게.
+정책토론회 시작을 알리며 주제를 소개하라. 다음 방식으로 진행하라:
+
+1) "여러분, 안녕하십니까" 같은 정중한 인사
+2) 오늘 토론회의 중요성과 의미 강조
+3) 토론 주제 명확히 제시
+4) 양측의 열띤 토론 기대와 독려
+5) "시작하겠습니다" 같은 진행 선언
+
+실제 방송 토론회 사회자처럼 품격있고 공정하게 진행하라.
 
 사회자:"""
         
-        return self.generate_response(prompt, max_length=80)
+        return self.generate_response(prompt, max_length=150)
     
     def _conclude_debate(self, statements: List[Dict]) -> str:
         # 양측 주장 요약
@@ -37,11 +65,17 @@ class ModeratorAgent(BaseAgent):
         
         prompt = f"""{self.system_prompt}
 
-토론이 끝났다. 진보 측 {progressive_count}회, 보수 측 {conservative_count}회 발언했다.
+토론이 마무리되었다. 진보 측 {progressive_count}회, 보수 측 {conservative_count}회 발언했다.
 
-토론 종료를 선언하고 양측의 열띤 토론에 감사 인사를 전하라.
-1-2문장으로 간결하게.
+토론 종료를 선언하고 마무리하라. 다음 방식으로 진행하라:
+
+1) 양측의 열띤 토론에 대한 감사 인사
+2) 토론 과정의 성과와 의미 정리
+3) 국민들의 현명한 선택 당부
+4) "수고 많으셨습니다" 같은 격려와 마무리 인사
+
+품격있고 중립적으로 토론회를 마무리하라.
 
 사회자:"""
         
-        return self.generate_response(prompt, max_length=80) 
+        return self.generate_response(prompt, max_length=150) 
