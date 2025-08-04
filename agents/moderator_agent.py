@@ -5,20 +5,16 @@ class ModeratorAgent(BaseAgent):
     def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
         super().__init__(model_name)
         self.system_prompt = """너는 간결하고 중립적인 토론 사회자다. 짧고 명확하게 진행하라."""
-        self.factcheck_prompt = """너는 팩트체커다. 발언의 사실성을 간단히 판단하라. O(사실) 또는 X(거짓/과장)로만 답하라."""
 
     def process_input(self, input_data: Dict) -> str:
         action = input_data.get('action', '')
         topic = input_data.get('topic', '')
         statements = input_data.get('statements', [])
-        statement_to_check = input_data.get('statement_to_check', '')
         
         if action == 'introduce':
             return self._introduce_debate(topic)
         elif action == 'conclude':
             return self._conclude_debate(statements)
-        elif action == 'factcheck':
-            return self._factcheck_statement(statement_to_check)
         else:
             return "사회자 역할을 수행할 수 없습니다."
     
@@ -48,29 +44,4 @@ class ModeratorAgent(BaseAgent):
 
 사회자:"""
         
-        return self.generate_response(prompt, max_length=80)
-    
-    def _factcheck_statement(self, statement: str) -> str:
-        """발언에 대한 간단한 팩트체크를 수행합니다."""
-        if not statement:
-            return "X"
-            
-        prompt = f"""{self.factcheck_prompt}
-
-발언: "{statement}"
-
-이 발언이 일반적으로 알려진 사실에 부합하는가?
-- 명백한 사실이거나 합리적 주장이면: O
-- 명백히 틀렸거나 과장이면: X
-
-답변: """
-        
-        response = self.generate_response(prompt, max_length=10)
-        
-        # O/X만 추출
-        if 'O' in response.upper():
-            return 'O'
-        elif 'X' in response.upper():
-            return 'X'
-        else:
-            return 'O'  # 기본값 
+        return self.generate_response(prompt, max_length=80) 

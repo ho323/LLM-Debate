@@ -19,7 +19,6 @@ class DebateManager:
         # 토론 상태 관리
         self.current_topic = ""
         self.statements = []
-        self.factcheck_results = []
         self.round_count = 0
         self.max_rounds = 3
         
@@ -29,7 +28,6 @@ class DebateManager:
         """토론을 시작합니다."""
         self.current_topic = topic
         self.statements = []
-        self.factcheck_results = []
         self.round_count = 0
         
         print(f"\n=== 토론 시작: {topic} ===")
@@ -48,102 +46,60 @@ class DebateManager:
             'status': 'started'
         }
     
-    def conduct_round(self) -> Dict:
-        """한 라운드의 토론을 진행합니다 (직전 발언 반박)."""
+    def proceed_round(self) -> Dict:
+        """한 라운드를 진행합니다."""
         if self.round_count >= self.max_rounds:
-            return {'status': 'completed', 'message': '토론이 종료되었습니다.'}
-        
+            return {'status': 'finished', 'message': '최대 라운드에 도달했습니다.'}
+            
         self.round_count += 1
-        print(f"\n--- 라운드 {self.round_count} ---")
-        
         round_results = {
             'round': self.round_count,
-            'statements': [],
-            'factcheck_results': []
+            'progressive_statement': '',
+            'conservative_statement': '',
+            'status': 'completed'
         }
         
-        # 1. 진보 에이전트 발언 (직전 보수 발언만 전달)
-        last_conservative_statement = self._get_last_statement('보수')
+        print(f"\n--- 라운드 {self.round_count} ---")
         
-        progressive_input = {
-            'topic': self.current_topic,
-            'opponent_statement': last_conservative_statement  # 직전 보수 발언만
-        }
-        progressive_statement = self.progressive_agent.process_input(progressive_input)
+        # 진보 측 발언
+        progressive_statement = self.progressive_agent.generate_argument(
+            topic=self.current_topic,
+            round_number=self.round_count,
+            previous_statements=self.statements
+        )
         
-        progressive_data = {
+        self.statements.append({
+            'round': self.round_count,
             'stance': '진보',
-            'content': progressive_statement,
-            'round': self.round_count
-        }
-        self.statements.append(progressive_data)
-        round_results['statements'].append(progressive_data)
+            'statement': progressive_statement
+        })
+        round_results['progressive_statement'] = progressive_statement
         
         print(f"\n🔵 진보: {progressive_statement}")
         
-        # 진보 발언 팩트체크
-        progressive_factcheck = self.moderator_agent.process_input({
-            'action': 'factcheck',
-            'statement_to_check': progressive_statement
-        })
+        # 보수 측 발언
+        conservative_statement = self.conservative_agent.generate_argument(
+            topic=self.current_topic,
+            round_number=self.round_count,
+            previous_statements=self.statements
+        )
         
-        factcheck_result_prog = {
-            'stance': '진보',
-            'statement': progressive_statement,
-            'result': progressive_factcheck
-        }
-        self.factcheck_results.append(factcheck_result_prog)
-        round_results['factcheck_results'].append(factcheck_result_prog)
-        
-        print(f"📊 팩트체크: {progressive_factcheck}")
-        
-        # 2. 보수 에이전트 반박 (직전 진보 발언만 전달)
-        conservative_input = {
-            'topic': self.current_topic,
-            'opponent_statement': progressive_statement  # 방금 진보 발언
-        }
-        conservative_statement = self.conservative_agent.process_input(conservative_input)
-        
-        conservative_data = {
+        self.statements.append({
+            'round': self.round_count,
             'stance': '보수',
-            'content': conservative_statement,
-            'round': self.round_count
-        }
-        self.statements.append(conservative_data)
-        round_results['statements'].append(conservative_data)
+            'statement': conservative_statement
+        })
+        round_results['conservative_statement'] = conservative_statement
         
         print(f"\n🔴 보수: {conservative_statement}")
         
-        # 보수 발언 팩트체크
-        conservative_factcheck = self.moderator_agent.process_input({
-            'action': 'factcheck',
-            'statement_to_check': conservative_statement
-        })
-        
-        factcheck_result_cons = {
-            'stance': '보수',
-            'statement': conservative_statement,
-            'result': conservative_factcheck
-        }
-        self.factcheck_results.append(factcheck_result_cons)
-        round_results['factcheck_results'].append(factcheck_result_cons)
-        
-        print(f"📊 팩트체크: {conservative_factcheck}")
-        
         return round_results
     
-    def _get_last_statement(self, stance: str) -> Optional[str]:
-        """지정된 성향의 마지막 발언을 가져옵니다."""
-        for statement in reversed(self.statements):
-            if statement.get('stance') == stance:
-                return statement.get('content', '')
-        return None
-    
-    def conclude_debate(self) -> Dict:
-        """토론을 마무리하고 요약을 생성합니다."""
-        print(f"\n=== 토론 마무리 ===")
+    def summarize_debate(self) -> Dict:
+        """토론을 요약합니다."""
+        print(f"\n=== 토론 요약 ===")
         
-        # 사회자 마무리 (간결하게)
+        # 사회자 마무리
         moderator_conclusion = self.moderator_agent.process_input({
             'action': 'conclude',
             'statements': self.statements
@@ -151,72 +107,40 @@ class DebateManager:
         
         print(f"\n🎯 사회자: {moderator_conclusion}")
         
-        # 팩트체크 요약
-        print(f"\n📊 팩트체크 결과:")
-        prog_o_count = len([f for f in self.factcheck_results if f['stance'] == '진보' and f['result'] == 'O'])
-        prog_x_count = len([f for f in self.factcheck_results if f['stance'] == '진보' and f['result'] == 'X'])
-        cons_o_count = len([f for f in self.factcheck_results if f['stance'] == '보수' and f['result'] == 'O'])
-        cons_x_count = len([f for f in self.factcheck_results if f['stance'] == '보수' and f['result'] == 'X'])
+        # 발언 요약
+        print(f"\n📝 발언 요약:")
+        prog_count = len([s for s in self.statements if s['stance'] == '진보'])
+        cons_count = len([s for s in self.statements if s['stance'] == '보수'])
+        print(f"  진보측: {prog_count}건")
+        print(f"  보수측: {cons_count}건")
+        print(f"  총 라운드: {self.round_count}")
         
-        print(f"진보: O({prog_o_count}) X({prog_x_count})")
-        print(f"보수: O({cons_o_count}) X({cons_x_count})")
+        # 상세 요약 생성
+        summary = self.summary_agent.summarize_debate(
+            topic=self.current_topic,
+            statements=self.statements
+        )
         
-        # 전체 토론 요약
-        summary_input = {
-            'action': 'summarize_debate',
-            'topic': self.current_topic,
-            'statements': self.statements
-        }
-        debate_summary = self.summary_agent.process_input(summary_input)
-        
-        print(f"\n📋 토론 요약:\n{debate_summary}")
+        print(f"\n📊 상세 요약:")
+        print(summary)
         
         return {
             'topic': self.current_topic,
             'total_rounds': self.round_count,
+            'total_statements': len(self.statements),
+            'progressive_statements': prog_count,
+            'conservative_statements': cons_count,
+            'summary': summary,
             'moderator_conclusion': moderator_conclusion,
-            'debate_summary': debate_summary,
-            'all_statements': self.statements,
-            'factcheck_summary': {
-                'progressive': {'O': prog_o_count, 'X': prog_x_count},
-                'conservative': {'O': cons_o_count, 'X': cons_x_count}
-            },
-            'status': 'completed'
-        }
-    
-    def run_full_debate(self, topic: str) -> Dict:
-        """전체 토론을 자동으로 실행합니다."""
-        # 토론 시작
-        start_result = self.start_debate(topic)
-        
-        # 라운드 진행 (진보 vs 보수 교대)
-        round_results = []
-        while self.round_count < self.max_rounds:
-            round_result = self.conduct_round()
-            if round_result.get('status') == 'completed':
-                break
-            round_results.append(round_result)
-        
-        # 토론 마무리
-        conclusion = self.conclude_debate()
-        
-        return {
-            'start_result': start_result,
-            'round_results': round_results,
-            'conclusion': conclusion
+            'all_statements': self.statements
         }
     
     def get_debate_status(self) -> Dict:
         """현재 토론 상태를 반환합니다."""
-        progressive_count = len([s for s in self.statements if s.get('stance') == '진보'])
-        conservative_count = len([s for s in self.statements if s.get('stance') == '보수'])
-        
         return {
-            'current_topic': self.current_topic,
-            'round_count': self.round_count,
+            'topic': self.current_topic,
+            'current_round': self.round_count,
             'max_rounds': self.max_rounds,
             'total_statements': len(self.statements),
-            'progressive_statements': progressive_count,
-            'conservative_statements': conservative_count,
-            'total_factchecks': len(self.factcheck_results)
+            'can_proceed': self.round_count < self.max_rounds
         } 

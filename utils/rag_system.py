@@ -108,25 +108,4 @@ class RAGSystem:
             "topic": topic
         }
         self.knowledge_base.append(new_doc)
-        self._build_index()  # 인덱스 재구축
-    
-    def get_factcheck_context(self, statement: str) -> List[Dict]:
-        """팩트체크를 위한 관련 정보를 검색합니다."""
-        keywords = self.extract_keywords(statement)
-        
-        # 키워드 기반 검색과 의미 검색 결합
-        keyword_query = " ".join(keywords) if keywords else statement
-        semantic_results = self.search_relevant_info(statement, top_k=3)
-        keyword_results = self.search_relevant_info(keyword_query, top_k=2)
-        
-        # 중복 제거 및 통합
-        all_results = semantic_results + keyword_results
-        seen_contents = set()
-        unique_results = []
-        
-        for result in all_results:
-            if result['content'] not in seen_contents:
-                seen_contents.add(result['content'])
-                unique_results.append(result)
-        
-        return unique_results[:5]  # 최대 5개 결과 반환 
+        self._build_index()  # 인덱스 재구축 
