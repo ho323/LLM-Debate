@@ -1,4 +1,5 @@
 from typing import Dict, List, Optional
+from utils.rag_system import RAGSystem
 from agents import (
     ProgressiveAgent, 
     ConservativeAgent, 
@@ -7,9 +8,17 @@ from agents import (
 )
 
 class DebateManager:
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B',
+        rag_progressive: Optional[RAGSystem] = None,
+        rag_conservative: Optional[RAGSystem] = None):
         print("토론 시스템 초기화 중...")
         
+
+        ###RAG 연결 ###
+        self.rag_progressive = rag_progressive
+        self.rag_conservative = rag_conservative
+
+
         # 에이전트들 초기화 (진보 vs 보수만)
         self.progressive_agent = ProgressiveAgent(model_name)
         self.conservative_agent = ConservativeAgent(model_name)
@@ -65,7 +74,8 @@ class DebateManager:
         progressive_statement = self.progressive_agent.generate_argument(
             topic=self.current_topic,
             round_number=self.round_count,
-            previous_statements=self.statements
+            previous_statements=self.statements,
+            rag=self.rag_progressive
         )
         
         self.statements.append({
@@ -81,7 +91,8 @@ class DebateManager:
         conservative_statement = self.conservative_agent.generate_argument(
             topic=self.current_topic,
             round_number=self.round_count,
-            previous_statements=self.statements
+            previous_statements=self.statements,
+            rag=self.rag_conservative
         )
         
         self.statements.append({

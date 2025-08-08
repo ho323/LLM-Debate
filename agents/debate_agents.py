@@ -1,5 +1,6 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from .base_agent import BaseAgent
+from utils.rag_system import RAGSystem
 
 class ProgressiveAgent(BaseAgent):
     def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
@@ -27,15 +28,27 @@ class ProgressiveAgent(BaseAgent):
 - 상대방 정책의 부작용 사례 제시
 - 서민과 중산층의 관점에서 접근"""
 
-    def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict]) -> str:
+    def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict],rag: Optional[RAGSystem] = None) -> str:
         # 이전 발언들로부터 맥락 파악
         context = self._build_context(previous_statements)
         
+        ###RAG 정보 ###
+        rag_context = ""
+        if rag:
+          relevant_info =rag.search_relevant_info(topic)
+          if relevant_info:
+            rag_context = "\n\n[정책 관련 배경 정보]\n"
+            for item in relevant_info:
+              rag_context += f"- {item['content']} (출처: {item['source']})\n"
+        ###RAG 때문에 수정한 부분###
+
         if round_number == 1:
             # 첫 라운드 - 선제 공격
             prompt = f"""{self.system_prompt}
 
 토론 주제: {topic}
+{rag_context} 
+
 
 첫 번째 라운드로서 진보 진영의 입장을 강력하게 제시하라. 다음 방식으로 접근하라:
 
@@ -129,14 +142,23 @@ class ConservativeAgent(BaseAgent):
 - 성공 사례와 경험적 근거 제시
 - 국가 경쟁력과 미래 세대 책임감 강조"""
 
-    def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict]) -> str:
+    def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict], rag: Optional[RAGSystem] = None) -> str:
         context = self._build_context(previous_statements)
         
+        rag_context = ""
+        if rag:
+            relevant_info = rag.search_relevant_info(topic)
+            if relevant_info:
+                rag_context = "\n\n[정책 관련 배경 정보]\n"
+                for item in relevant_info:
+                    rag_context += f"- {item['content']} (출처: {item['source']})\n"
+
         if round_number == 1:
             # 첫 라운드 - 기조 발언
             prompt = f"""{self.system_prompt}
 
 토론 주제: {topic}
+{rag_context} 
 
 첫 번째 라운드로서 보수 진영의 입장을 체계적으로 제시하라. 다음 방식으로 접근하라:
 
