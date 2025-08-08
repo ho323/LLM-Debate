@@ -11,7 +11,6 @@ from typing import Dict, List
 from datetime import datetime
 import json
 from debate_manager import DebateManager
-from utils.rag_system import RAGSystem 
 
 def ensure_results_dir():
     """결과 저장 디렉토리를 생성합니다."""
@@ -41,7 +40,7 @@ def save_debate_results(results: Dict, topic: str):
 def main():
     parser = argparse.ArgumentParser(description='AI 정치 토론 시스템 (진보 vs 보수)')
     parser.add_argument('--topic', '-t', type=str, 
-                       default='민생회복 소비쿠폰에 대한 입장',
+                       default='민생경제 회복을 위한 정부 역할과 정책 방향',
                        help='토론 주제')
     parser.add_argument('--rounds', '-r', type=int, default=3,
                        help='토론 라운드 수 (기본값: 3)')
@@ -55,20 +54,9 @@ def main():
     
     args = parser.parse_args()
     
-    try:
-        rag_progressive = RAGSystem.from_json("/content/drive/MyDrive/llm_bitamin/LLM-Debate/data/articles/conservative_opinion_articles.json")
-        rag_conservative = RAGSystem.from_json("/content/drive/MyDrive/llm_bitamin/LLM-Debate/data/articles/progressive_opinion_articles.json")
-    except Exception as e:
-        print(f"❌ RAG 데이터 로딩 실패: {e}")
-        sys.exit(1)
-
-
     # 토론 매니저 초기화
     try:
-        debate_manager = DebateManager(model_name=args.model,
-                                      rag_progressive=rag_progressive,
-                                      rag_conservative=rag_conservative
-                                      )
+        debate_manager = DebateManager(model_name=args.model)
         debate_manager.max_rounds = args.rounds
         
         print(f"🤖 진보 vs 보수 토론을 시작합니다...")
