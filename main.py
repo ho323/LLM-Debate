@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 정치 토론 시뮬레이션 시스템
-진보 vs 보수 에이전트 간 토론, O/X 팩트체크, 요약 기능 제공
+진보 vs 보수 에이전트 간 토론 및 요약 기능 제공
 """
 
 import sys
@@ -11,6 +11,7 @@ from typing import Dict, List
 from datetime import datetime
 import json
 from debate_manager import DebateManager
+from utils.rag_system import RAGSystem 
 
 def ensure_results_dir():
     """결과 저장 디렉토리를 생성합니다."""
@@ -38,9 +39,9 @@ def save_debate_results(results: Dict, topic: str):
         print(f"파일 저장 중 오류 발생: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='AI 정치 토론 시스템 (진보 vs 보수 + 팩트체크)')
+    parser = argparse.ArgumentParser(description='AI 정치 토론 시스템 (진보 vs 보수)')
     parser.add_argument('--topic', '-t', type=str, 
-                       default='최저임금 인상 정책에 대한 찬반 토론',
+                       default='민생회복 소비쿠폰에 대한 입장',
                        help='토론 주제')
     parser.add_argument('--rounds', '-r', type=int, default=3,
                        help='토론 라운드 수 (기본값: 3)')
@@ -49,134 +50,172 @@ def main():
                        help='사용할 Hugging Face 모델')
     parser.add_argument('--interactive', '-i', action='store_true',
                        help='대화형 모드로 실행')
+    parser.add_argument('--auto', '-a', action='store_true',
+                       help='자동 모드로 전체 토론 실행')
     
     args = parser.parse_args()
     
     try:
-        # 결과 저장 디렉토리 초기화
-        ensure_results_dir()
-        
-        # 토론 관리자 초기화
-        debate_manager = DebateManager(model_name=args.model)
-        debate_manager.max_rounds = args.rounds
-        
-        if args.interactive:
-            run_interactive_mode(debate_manager)
-        else:
-            run_auto_mode(debate_manager, args.topic)
-            
-    except KeyboardInterrupt:
-        print("\n\n토론이 사용자에 의해 중단되었습니다.")
-        sys.exit(0)
+        rag_progressive = RAGSystem.from_json("/content/drive/MyDrive/llm_bitamin/LLM-Debate/data/articles/conservative_opinion_articles.json")
+        rag_conservative = RAGSystem.from_json("/content/drive/MyDrive/llm_bitamin/LLM-Debate/data/articles/progressive_opinion_articles.json")
     except Exception as e:
-        print(f"\n오류가 발생했습니다: {e}")
+        print(f"❌ RAG 데이터 로딩 실패: {e}")
         sys.exit(1)
 
-def run_auto_mode(debate_manager: DebateManager, topic: str):
-    """자동 모드: 전체 토론을 한 번에 실행"""
-    print(f"🤖 진보 vs 보수 토론을 시작합니다... (실시간 팩트체크 포함)")
-    print(f"주제: {topic}")
-    print(f"라운드 수: {debate_manager.max_rounds}")
-    print("=" * 80)
-    
-    # 전체 토론 실행
-    results = debate_manager.run_full_debate(topic)
-    
-    print("\n" + "=" * 80)
-    print("🎉 토론이 완료되었습니다!")
-    
-    # 결과 저장 (선택사항)
-    save_results = input("\n결과를 파일로 저장하시겠습니까? (y/N): ").lower().strip()
-    if save_results == 'y':
-        save_debate_results(results, topic)
 
-def run_interactive_mode(debate_manager: DebateManager):
-    """대화형 모드: 사용자가 각 단계를 제어"""
-    print("🎯 대화형 모드로 시작합니다.")
-    print("명령어: start, round, conclude, status, quit")
-    
-    while True:
-        try:
-            command = input("\n명령어를 입력하세요: ").strip().lower()
+    # 토론 매니저 초기화
+    try:
+        debate_manager = DebateManager(model_name=args.model,
+                                      rag_progressive=rag_progressive,
+                                      rag_conservative=rag_conservative
+                                      )
+        debate_manager.max_rounds = args.rounds
+        
+        print(f"🤖 진보 vs 보수 토론을 시작합니다...")
+        print(f"📝 주제: {args.topic}")
+        print(f"🔄 라운드: {args.rounds}")
+        print(f"🧠 모델: {args.model}")
+        
+        if args.auto:
+            # 자동 모드
+            run_auto_debate(debate_manager, args.topic)
+        else:
+            # 대화형 모드 (기본값)
+            run_interactive_debate(debate_manager, args.topic)
             
-            if command == 'quit' or command == 'q':
-                print("토론 시스템을 종료합니다.")
+    except Exception as e:
+        print(f"❌ 오류 발생: {e}")
+        print("💡 가능한 해결 방법:")
+        print("  1. 인터넷 연결 확인")
+        print("  2. Hugging Face 모델 이름 확인")
+        print("  3. 시스템 리소스 확인")
+        sys.exit(1)
+
+def run_auto_debate(debate_manager: DebateManager, topic: str):
+    """자동으로 전체 토론을 실행합니다."""
+    try:
+        # 토론 시작
+        start_result = debate_manager.start_debate(topic)
+        
+        # 모든 라운드 진행
+        round_results = []
+        while debate_manager.round_count < debate_manager.max_rounds:
+            round_result = debate_manager.proceed_round()
+            round_results.append(round_result)
+            
+            if round_result.get('status') == 'finished':
                 break
-                
-            elif command == 'start':
-                topic = input("토론 주제를 입력하세요: ").strip()
-                if topic:
-                    debate_manager.start_debate(topic)
+        
+        # 토론 요약
+        summary_result = debate_manager.summarize_debate()
+        
+        # 결과 저장
+        full_results = {
+            'start_result': start_result,
+            'round_results': round_results,
+            'summary_result': summary_result,
+            'metadata': {
+                'timestamp': datetime.now().isoformat(),
+                'total_rounds': debate_manager.round_count,
+                'topic': topic
+            }
+        }
+        
+        save_debate_results(full_results, topic)
+        
+    except KeyboardInterrupt:
+        print("\n\n토론이 중단되었습니다.")
+    except Exception as e:
+        print(f"❌ 토론 중 오류 발생: {e}")
+
+def run_interactive_debate(debate_manager: DebateManager, topic: str):
+    """대화형 모드로 토론을 진행합니다."""
+    try:
+        # 토론 시작
+        debate_manager.start_debate(topic)
+        
+        print("\n" + "="*60)
+        print("🎮 대화형 토론 모드")
+        print("="*60)
+        
+        while True:
+            # 현재 상태 표시
+            status = debate_manager.get_debate_status()
+            print(f"\n📊 현재 상태:")
+            print(f"  라운드: {status['current_round']}/{status['max_rounds']}")
+            print(f"  발언 수: {status['total_statements']}건")
+            
+            print(f"\n💡 명령어:")
+            print(f"  round       - 다음 라운드 진행 (진보 → 보수)")
+            print(f"  status      - 현재 토론 상태 확인")
+            print(f"  summary     - 토론 요약 및 종료")
+            print(f"  save        - 현재까지 결과 저장")
+            print(f"  quit        - 토론 종료")
+            
+            print(f"\n💬 토론 진행 방식:")
+            print(f"각 라운드에서 진보 → 보수 순으로 발언합니다.")
+            
+            command = input(f"\n명령어를 입력하세요: ").strip().lower()
+            
+            if command == 'round':
+                if status['can_proceed']:
+                    debate_manager.proceed_round()
                 else:
-                    print("올바른 주제를 입력해주세요.")
-                    
-            elif command == 'round':
-                if not debate_manager.current_topic:
-                    print("먼저 토론을 시작해주세요. (start 명령어 사용)")
-                    continue
-                    
-                result = debate_manager.conduct_round()
-                if result.get('status') == 'completed':
-                    print("모든 라운드가 완료되었습니다. conclude 명령어로 마무리하세요.")
-                    
-            elif command == 'conclude':
-                if not debate_manager.current_topic:
-                    print("진행 중인 토론이 없습니다.")
-                    continue
-                    
-                conclusion = debate_manager.conclude_debate()
-                
-                save_results = input("\n결과를 파일로 저장하시겠습니까? (y/N): ").lower().strip()
-                if save_results == 'y':
-                    save_debate_results({
-                        'conclusion': conclusion,
-                        'topic': debate_manager.current_topic
-                    }, debate_manager.current_topic)
+                    print("⚠️ 최대 라운드에 도달했습니다. 'summary'로 요약하거나 'quit'로 종료하세요.")
                     
             elif command == 'status':
-                status = debate_manager.get_debate_status()
-                print(f"\n현재 토론 상태:")
-                print(f"  주제: {status['current_topic'] or '없음'}")
-                print(f"  라운드: {status['round_count']}/{status['max_rounds']}")
-                print(f"  진보 발언: {status['progressive_statements']}회")
-                print(f"  보수 발언: {status['conservative_statements']}회")
-                print(f"  팩트체크: {status['total_factchecks']}건")
+                print_detailed_status(status)
                 
-            elif command == 'help':
-                show_help()
+            elif command == 'summary':
+                summary_result = debate_manager.summarize_debate()
+                
+                # 결과 저장
+                full_results = {
+                    'summary_result': summary_result,
+                    'metadata': {
+                        'timestamp': datetime.now().isoformat(),
+                        'total_rounds': debate_manager.round_count,
+                        'topic': topic
+                    }
+                }
+                save_debate_results(full_results, topic)
+                break
+                
+            elif command == 'save':
+                current_results = {
+                    'current_statements': debate_manager.statements,
+                    'metadata': {
+                        'timestamp': datetime.now().isoformat(),
+                        'total_rounds': debate_manager.round_count,
+                        'topic': topic,
+                        'status': 'in_progress'
+                    }
+                }
+                save_debate_results(current_results, topic)
+                
+            elif command == 'quit':
+                print("토론을 종료합니다.")
+                break
                 
             else:
-                print("알 수 없는 명령어입니다. 'help'를 입력하여 도움말을 확인하세요.")
+                print("❌ 알 수 없는 명령어입니다.")
                 
-        except KeyboardInterrupt:
-            print("\n\n토론이 중단되었습니다.")
-            break
-        except Exception as e:
-            print(f"오류 발생: {e}")
+    except KeyboardInterrupt:
+        print("\n\n토론이 중단되었습니다.")
+    except Exception as e:
+        print(f"❌ 토론 중 오류 발생: {e}")
 
-def show_help():
-    """도움말 표시"""
-    help_text = """
-사용 가능한 명령어:
-  start       - 새로운 토론 시작
-  round       - 다음 라운드 진행 (진보 → 보수 + 각각 팩트체크)
-  conclude    - 토론 마무리 및 요약
-  status      - 현재 토론 상태 확인
-  help        - 이 도움말 표시
-  quit/q      - 프로그램 종료
-
-토론 진행 순서:
-  1. start 명령어로 토론 시작
-  2. round 명령어로 라운드 진행 (여러 번 반복 가능)
-  3. conclude 명령어로 토론 마무리
-  
-각 발언 후 자동으로 O/X 팩트체크가 진행됩니다.
-토론 결과는 'debate_results' 폴더에 저장됩니다.
-"""
-    print(help_text)
+def print_detailed_status(status: Dict):
+    """상세한 토론 상태를 출력합니다."""
+    print(f"\n📈 상세 토론 상태:")
+    print(f"  주제: {status['topic']}")
+    print(f"  진행률: {status['current_round']}/{status['max_rounds']} 라운드")
+    print(f"  총 발언: {status['total_statements']}건")
+    
+    if status['can_proceed']:
+        print(f"  상태: 진행 중 ⚡")
+    else:
+        print(f"  상태: 완료 ✅")
 
 if __name__ == "__main__":
-    print("🎭 진보 vs 보수 AI 토론 시스템에 오신 것을 환영합니다!")
-    print("📊 실시간 O/X 팩트체크 기능 포함")
-    print("=" * 60)
     main() 
