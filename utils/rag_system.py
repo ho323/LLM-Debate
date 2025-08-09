@@ -1,115 +1,103 @@
-import json
 from typing import List, Dict, Optional
-from sentence_transformers import SentenceTransformer
-import numpy as np
+from llama_index.core import Document, VectorStoreIndex, StorageContext
+from llama_index.embeddings.huggingface import HuggingFaceEmbedding
+from llama_index.vector_stores.faiss import FaissVectorStore
 import faiss
 
 class RAGSystem:
     def __init__(self, knowledge_base: Optional[List[Dict]] = None):
-        self.encoder = SentenceTransformer('jhgan/ko-sroberta-multitask')
-        self.knowledge_base = knowledge_base if knowledge_base else []
-        self.embeddings = None
-        self.index = None
-        self.id_to_doc = {}  # FAISS ID → 문서 매핑
+        # 기존 스키마 그대로 사용: content/ source/ stance/ date/ title/ url ...
+        self.knowledge_base = knowledge_base or []
+
+        # 네가 쓰던 한국어 임베딩 유지
+        self.embed_model = HuggingFaceEmbedding(model_name="jhgan/ko-sroberta-multitask")
+
+        # 임베딩 차원 파악
+        dim = len(self.embed_model.get_text_embedding("dim probe"))
+        self.faiss_index = faiss.IndexFlatIP(dim)  # 코사인=내적 쓰려면 정규화 전제
+        self.vector_store = FaissVectorStore(faiss_index=self.faiss_index)
+        self.storage_ctx = StorageContext.from_defaults(vector_store=self.vector_store)
+
+        self.index: Optional[VectorStoreIndex] = None
+        self.retriever = None
         self._build_index()
 
     @classmethod
-    def from_json(cls, json_path: str) -> 'RAGSystem':
-        with open(json_path, 'r', encoding='utf-8') as f:
+    def from_json(cls, json_path: str) -> 'RAGSystemLlamaIndex':
+        import json
+        with open(json_path, "r", encoding="utf-8") as f:
             raw = json.load(f)
 
-        knowledge_base = []
-
+        kb = []
         if isinstance(raw, dict) and "evidence" in raw:
-            knowledge_base = [
+            kb = [
                 {
-                    "content": sentence,
+                    "content": sent,
                     "source": raw.get("source"),
                     "stance": raw.get("stance"),
-                    "date": raw.get("date"),
-                    "title": raw.get("title"),
-                    "url": raw.get("url")
+                    "date":   raw.get("date"),
+                    "title":  raw.get("title"),
+                    "url":    raw.get("url"),
                 }
-                for sentence in raw["evidence"]
+                for sent in raw["evidence"]
             ]
-
         elif isinstance(raw, list):
             for doc in raw:
                 if "evidence" in doc:
-                    knowledge_base.extend([
+                    kb.extend([
                         {
-                            "content": sentence,
+                            "content": sent,
                             "source": doc.get("source"),
                             "stance": doc.get("stance"),
-                            "date": doc.get("date"),
-                            "title": doc.get("title"),
-                            "url": doc.get("url")
+                            "date":   doc.get("date"),
+                            "title":  doc.get("title"),
+                            "url":    doc.get("url"),
                         }
-                        for sentence in doc["evidence"]
+                        for sent in doc["evidence"]
                     ])
         else:
-            raise ValueError("지원되지 않는 JSON 형식입니다.")
+            raise ValueError("지원되지 않는 JSON 형식")
 
-        return cls(knowledge_base)
+        return cls(kb)
 
     def _build_index(self):
         if not self.knowledge_base:
             return
-        
-        texts = [item["content"] for item in self.knowledge_base]
-        self.embeddings = self.encoder.encode(texts)
-        
-        dimension = self.embeddings.shape[1]
-        base_index = faiss.IndexFlatIP(dimension)
-        self.index = faiss.IndexIDMap2(base_index)
 
-        normalized_embeddings = self.embeddings / np.linalg.norm(self.embeddings, axis=1, keepdims=True)
-        
-        ids = np.arange(len(self.knowledge_base))
-        self.index.add_with_ids(normalized_embeddings.astype('float32'), ids)
+        docs = [
+            Document(
+                text=item["content"],
+                metadata={k: v for k, v in item.items() if k != "content"}
+            )
+            for item in self.knowledge_base
+        ]
 
-        self.id_to_doc = {i: doc for i, doc in enumerate(self.knowledge_base)}
+        # LlamaIndex가 임베딩→FAISS 저장까지 알아서 처리
+        self.index = VectorStoreIndex.from_documents(
+            docs,
+            storage_context=self.storage_ctx,
+            embed_model=self.embed_model,
+        )
+        self.retriever = self.index.as_retriever(similarity_top_k=3)
 
-    def search_relevant_info(self, query: str, top_k: int = 3) -> List[Dict]:
-        if not self.index or not self.knowledge_base:
+    def search_relevant_info(self, query: str, top_k: int = 3):
+        if not self.retriever:
             return []
-        
-        query_embedding = self.encoder.encode([query])
-        query_normalized = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
-        
-        scores, indices = self.index.search(query_normalized.astype('float32'), top_k)
+        self.retriever.similarity_top_k = top_k
+        nodes = self.retriever.retrieve(query)
 
+        # LlamaIndex는 상위 k개를 점수와 함께 반환
         results = []
-        for score, idx in zip(scores[0], indices[0]):
-            if idx == -1:
-                continue
-            if score > 0.3:
-                doc = self.id_to_doc.get(idx, {}).copy()
-                doc['relevance_score'] = float(score)
-                results.append(doc)
-        
+        for n in nodes:
+            # n.score는 유사도(코사인에 대응)
+            item = {"content": n.text, "relevance_score": float(n.score)}
+            # 문서 메타데이터 복원
+            item.update(n.metadata or {})
+            results.append(item)
         return results
 
-    def add_document(self, content: str, source: str, topic: str):
-        new_doc = {
-            "content": content,
-            "source": source,
-            "topic": topic
-        }
-        new_id = len(self.knowledge_base)
-
-        self.knowledge_base.append(new_doc)
-        self.id_to_doc[new_id] = new_doc
-
-        new_embedding = self.encoder.encode([content])
-        new_embedding = new_embedding / np.linalg.norm(new_embedding, axis=1, keepdims=True)
-
-        if self.index is None:
-            dimension = new_embedding.shape[1]
-            base_index = faiss.IndexFlatIP(dimension)
-            self.index = faiss.IndexIDMap2(base_index)
-            self.embeddings = new_embedding
-            self.index.add_with_ids(new_embedding.astype('float32'), np.array([new_id]))
-        else:
-            self.embeddings = np.vstack([self.embeddings, new_embedding])
-            self.index.add_with_ids(new_embedding.astype('float32'), np.array([new_id]))
+    def add_document(self, content: str, **metadata):
+        self.knowledge_base.append({"content": content, **metadata})
+        doc = Document(text=content, metadata=metadata)
+        # 증분 삽입(인덱스 재구축 불필요)
+        self.index.insert(documents=[doc])
