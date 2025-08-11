@@ -1,10 +1,13 @@
 from typing import Dict, List
 from .base_agent import BaseAgent
+from utils.rag_system import RAGSystem
+from typing import Optional
 
 class ProgressiveAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B', rag_system: Optional[RAGSystem] = None):
         super().__init__(model_name)
         self.stance = "진보"
+        self.rag_system = rag_system
         # 실제 민주당 토론자(김한규)의 말투와 성향 반영
         self.system_prompt = """너는 더불어민주당 소속 진보 정치인이다. 다음과 같은 특징을 가져라:
 
@@ -31,11 +34,23 @@ class ProgressiveAgent(BaseAgent):
         # 이전 발언들로부터 맥락 파악
         context = self._build_context(previous_statements)
         
+        # 관련 기사 검색(진보 시각)
+        evidence_text = ""
+        if self.rag_system:
+            retrieved_docs = self.rag_system.search(query=topic, stance_filter="진보")
+            if retrieved_docs:
+                evidence_text = "\n".join(
+                    [f"- {doc['text']} (출처: {doc['source']})" for doc in retrieved_docs[:3]]
+                )
+
+        # 공통적으로 프롬프트에 삽입
+        evidence_section = f"\n\n📚 참고 기사:\n{evidence_text}\n" if evidence_text else ""
+        
         if round_number == 1:
             # 첫 라운드 - 선제 공격
             prompt = f"""{self.system_prompt}
 
-토론 주제: {topic}
+토론 주제: {topic}{evidence_section}
 
 첫 번째 라운드로서 진보 진영의 입장을 강력하게 제시하라. 다음 방식으로 접근하라:
 
@@ -59,7 +74,7 @@ class ProgressiveAgent(BaseAgent):
 
 이전 맥락: {context}
 
-보수 측 주장: "{last_conservative}"
+보수 측 주장: "{last_conservative}"{evidence_section}
 
 위 보수 주장을 구체적으로 반박하며 진보 입장을 강화하라:
 
@@ -103,9 +118,10 @@ class ProgressiveAgent(BaseAgent):
         return self.generate_argument(topic, round_number, previous_statements)
 
 class ConservativeAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_name: str = '...', rag_system: Optional[RAGSystem] = None):
         super().__init__(model_name)
         self.stance = "보수"
+        self.rag_system = rag_system
         # 실제 국민의힘 토론자(박수민)의 말투와 성향 반영
         self.system_prompt = """너는 국민의힘 소속 보수 정치인이다. 다음과 같은 특징을 가져라:
 
@@ -131,6 +147,16 @@ class ConservativeAgent(BaseAgent):
 
     def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict]) -> str:
         context = self._build_context(previous_statements)
+        
+        # 기사 검색 (보수 시각)
+        evidence_text = ""
+        if self.rag_system:
+            retrieved_docs = self.rag_system.search(query=topic, stance_filter="보수")
+            if retrieved_docs:
+                evidence_text = "\n".join(
+                    [f"- {doc['text']} (출처: {doc['source']})" for doc in retrieved_docs[:3]]
+                )
+        evidence_section = f"\n\n📚 참고 기사:\n{evidence_text}\n" if evidence_text else ""
         
         if round_number == 1:
             # 첫 라운드 - 기조 발언
@@ -160,7 +186,7 @@ class ConservativeAgent(BaseAgent):
 
 이전 맥락: {context}
 
-진보 측 주장: "{last_progressive}"
+진보 측 주장: "{last_progressive}"s
 
 위 진보 주장을 체계적으로 반박하며 보수 입장을 강화하라:
 
