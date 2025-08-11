@@ -2,8 +2,8 @@ from typing import Dict, List
 from .base_agent import BaseAgent
 
 class SummaryAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
-        super().__init__(model_name)
+    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+        super().__init__(model_path)
         # 실제 방송사나 언론기관의 정책토론회 요약 스타일 반영
         self.system_prompt = """너는 중립적 정책 분석 전문가다. 다음과 같은 특징으로 토론을 요약하라:
 
@@ -35,7 +35,11 @@ class SummaryAgent(BaseAgent):
         
         statements_text = self._format_statements(progressive_statements, conservative_statements)
         
-        prompt = f"""{self.system_prompt}
+        prompt = f"""너는 중립적 정책 분석 전문가다. 다음 특징으로 토론을 요약하라:
+- 완전한 중립성 유지, 어느 쪽도 편들지 않음
+- 정책적 관점에서 객관적 분석
+- 양측 주장의 핵심 논리와 근거 정리
+- 전문적이면서도 이해하기 쉬운 언어 사용
 
 토론 주제: {topic}
 
@@ -62,11 +66,9 @@ class SummaryAgent(BaseAgent):
 ### ⚖️ 토론 평가
 양측이 제시한 논리의 특징과 국민들이 고려해야 할 판단 기준을 2-3문장으로 중립적 정리
 
-실제 언론사 정책 분석처럼 전문적이고 객관적으로 작성하라.
-
-요약:"""
+실제 언론사 정책 분석처럼 전문적이고 객관적으로 작성하라. 발화자의 발언만 출력하라."""
         
-        return self.generate_response(prompt, max_length=1000)
+        return self.generate_response(prompt)
     
     def _format_statements(self, progressive_statements: List[Dict], conservative_statements: List[Dict]) -> str:
         """발언을 정리된 형태로 포맷팅합니다."""

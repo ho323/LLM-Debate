@@ -7,14 +7,14 @@ from agents import (
 )
 
 class DebateManager:
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
         print("토론 시스템 초기화 중...")
         
         # 에이전트들 초기화 (진보 vs 보수만)
-        self.progressive_agent = ProgressiveAgent(model_name)
-        self.conservative_agent = ConservativeAgent(model_name)
-        self.moderator_agent = ModeratorAgent(model_name)
-        self.summary_agent = SummaryAgent(model_name)
+        self.progressive_agent = ProgressiveAgent(model_path)
+        self.conservative_agent = ConservativeAgent(model_path)
+        self.moderator_agent = ModeratorAgent(model_path)
+        self.summary_agent = SummaryAgent(model_path)
         
         # 토론 상태 관리
         self.current_topic = ""

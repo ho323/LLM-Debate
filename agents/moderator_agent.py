@@ -2,8 +2,8 @@ from typing import Dict, List
 from .base_agent import BaseAgent
 
 class ModeratorAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
-        super().__init__(model_name)
+    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+        super().__init__(model_path)
         # 실제 토론회 사회자(김용준)의 말투와 진행 방식 반영
         self.system_prompt = """너는 중앙선거방송토론위원회 소속 중립적 토론 사회자다. 다음과 같은 특징을 가져라:
 
@@ -40,42 +40,42 @@ class ModeratorAgent(BaseAgent):
             return "사회자 역할을 수행할 수 없습니다."
     
     def _introduce_debate(self, topic: str) -> str:
-        prompt = f"""{self.system_prompt}
+        prompt = f"""너는 중앙선거방송토론위원회 소속 중립적 토론 사회자다. 다음 특징을 가져라:
+- "여러분, 안녕하십니까" 같은 정중하고 격식있는 인사
+- 완전한 중립성 유지, 어떤 편도 들지 않음
+- 토론 규칙과 시간 관리를 정중하게 안내
 
 토론 주제: {topic}
 
-정책토론회 시작을 알리며 주제를 소개하라. 다음 방식으로 진행하라:
-
+정책토론회 시작을 알리며 주제를 소개하라:
 1) "여러분, 안녕하십니까" 같은 정중한 인사
 2) 오늘 토론회의 중요성과 의미 강조
 3) 토론 주제 명확히 제시
 4) 양측의 열띤 토론 기대와 독려
 5) "시작하겠습니다" 같은 진행 선언
 
-실제 방송 토론회 사회자처럼 품격있고 공정하게 진행하라.
-
-사회자:"""
+실제 방송 토론회 사회자처럼 품격있고 공정하게 진행하라. 발화자의 발언만 출력하라."""
         
-        return self.generate_response(prompt, max_length=150)
+        return self.generate_response(prompt)
     
     def _conclude_debate(self, statements: List[Dict]) -> str:
         # 양측 주장 요약
         progressive_count = len([s for s in statements if s.get('stance') == '진보'])
         conservative_count = len([s for s in statements if s.get('stance') == '보수'])
         
-        prompt = f"""{self.system_prompt}
+        prompt = f"""너는 중앙선거방송토론위원회 소속 중립적 토론 사회자다. 다음 특징을 가져라:
+- "잘 지켜주셨고요" "수고 많으셨고요" 같은 격려 표현
+- 완전한 중립성 유지, 어떤 편도 들지 않음
+- 건설적이고 품격있는 토론 분위기 조성
 
 토론이 마무리되었다. 진보 측 {progressive_count}회, 보수 측 {conservative_count}회 발언했다.
 
-토론 종료를 선언하고 마무리하라. 다음 방식으로 진행하라:
-
+토론 종료를 선언하고 마무리하라:
 1) 양측의 열띤 토론에 대한 감사 인사
 2) 토론 과정의 성과와 의미 정리
 3) 국민들의 현명한 선택 당부
 4) "수고 많으셨습니다" 같은 격려와 마무리 인사
 
-품격있고 중립적으로 토론회를 마무리하라.
-
-사회자:"""
+품격있고 중립적으로 토론회를 마무리하라. 발화자의 발언만 출력하라."""
         
-        return self.generate_response(prompt, max_length=150) 
+        return self.generate_response(prompt) 

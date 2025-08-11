@@ -2,8 +2,8 @@ from typing import Dict, List
 from .base_agent import BaseAgent
 
 class ProgressiveAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
-        super().__init__(model_name)
+    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+        super().__init__(model_path)
         self.stance = "진보"
         # 실제 민주당 토론자(김한규)의 말투와 성향 반영
         self.system_prompt = """너는 더불어민주당 소속 진보 정치인이다. 다음과 같은 특징을 가져라:
@@ -33,47 +33,41 @@ class ProgressiveAgent(BaseAgent):
         
         if round_number == 1:
             # 첫 라운드 - 선제 공격
-            prompt = f"""{self.system_prompt}
+            prompt = f"""너는 더불어민주당 소속 진보 정치인이다. 다음 특징을 가져라:
+- "국민 여러분" 같은 호명을 자주 사용
+- 구체적 수치와 사례를 제시하는 실무적 접근
+- 과감한 재정정책과 적극적 정부 역할 강조
+- 소득 불평등과 민생경제 문제에 집중
 
 토론 주제: {topic}
 
-첫 번째 라운드로서 진보 진영의 입장을 강력하게 제시하라. 다음 방식으로 접근하라:
+첫 번째 라운드로서 진보 진영의 입장을 강력하게 제시하라:
+1) 현재 상황의 심각성을 구체적 수치나 사례로 제시
+2) 정부나 보수 정책의 실패를 지적
+3) 진보적 해결책의 필요성을 강조
+4) 2-3문장으로 임팩트 있게 마무리
 
-1) "국민 여러분" 호명으로 시작
-2) 현재 상황의 심각성을 구체적 수치나 사례로 제시
-3) 정부나 보수 정책의 실패를 지적
-4) 진보적 해결책의 필요성을 강조
-5) 2-3문장으로 임팩트 있게 마무리
+실제 국회의원처럼 설득력 있고 전문적으로 답변하라. 
 
-실제 국회의원처럼 설득력 있고 전문적으로 답변하라.
-
-진보 주장:"""
+입력과 think 등의 불필요한 문장들은 제외하고 발화자의 발언만 출력하라."""
         else:
             # 후속 라운드 - 반박과 재반박
             last_conservative = self._get_last_conservative_statement(previous_statements)
             
-            prompt = f"""{self.system_prompt}
+            prompt = f"""너는 더불어민주당 소속 진보 정치인이다. 다음 특징을 가져라:
+- 구체적 데이터나 사례로 반증 제시
+- 서민과 중산층 관점에서 문제 제기
 
 토론 주제: {topic}
 라운드: {round_number}
 
-이전 맥락: {context}
-
 보수 측 주장: "{last_conservative}"
 
-위 보수 주장을 구체적으로 반박하며 진보 입장을 강화하라:
+날카롭고 논리적으로 반박하라. 
 
-1) 상대방 주장의 허점이나 모순 지적
-2) "저희가 보기에는..." 같은 표현으로 반박 시작
-3) 구체적 데이터나 사례로 반증 제시
-4) 서민과 중산층 관점에서 문제 제기
-5) "충분히 가능하다고 생각합니다" 같은 확신적 마무리
-
-날카롭고 논리적으로 반박하라.
-
-진보 반박:"""
+입력과 think 등의 불필요한 문장들은 제외하고 발화자의 발언만 출력하라."""
         
-        return self.generate_response(prompt, max_length=300)
+        return self.generate_response(prompt)
 
     def _build_context(self, statements: List[Dict]) -> str:
         if not statements:
@@ -103,8 +97,8 @@ class ProgressiveAgent(BaseAgent):
         return self.generate_argument(topic, round_number, previous_statements)
 
 class ConservativeAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
-        super().__init__(model_name)
+    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+        super().__init__(model_path)
         self.stance = "보수"
         # 실제 국민의힘 토론자(박수민)의 말투와 성향 반영
         self.system_prompt = """너는 국민의힘 소속 보수 정치인이다. 다음과 같은 특징을 가져라:
@@ -134,47 +128,46 @@ class ConservativeAgent(BaseAgent):
         
         if round_number == 1:
             # 첫 라운드 - 기조 발언
-            prompt = f"""{self.system_prompt}
+            prompt = f"""너는 국민의힘 소속 보수 정치인이다. 다음 특징을 가져라:
+- "존경하는 국민 여러분" 같은 정중한 호명
+- 시장경제와 민간 주도 성장 강조
+- 재정 건전성과 국가부채 우려
+- 책임감과 성찰을 보이는 표현 사용
 
 토론 주제: {topic}
 
-첫 번째 라운드로서 보수 진영의 입장을 체계적으로 제시하라. 다음 방식으로 접근하라:
+첫 번째 라운드로서 보수 진영의 입장을 체계적으로 제시하라:
+1) 현 상황에 대한 냉정한 진단과 우려 표명
+2) 민주당/진보 정책의 문제점을 구체적으로 지적
+3) 시장경제와 재정 건전성의 중요성 강조
 
-1) "존경하는 국민 여러분" 호명으로 정중하게 시작
-2) 현 상황에 대한 냉정한 진단과 우려 표명
-3) 민주당/진보 정책의 문제점을 구체적으로 지적
-4) 시장경제와 재정 건전성의 중요성 강조
-5) "저희는... 하겠습니다" 같은 의지 표명으로 마무리
+국정 경험과 책임감이 느껴지도록 답변하라. 
 
-국정 경험과 책임감이 느껴지도록 답변하라.
-
-보수 주장:"""
+입력과 think 등의 불필요한 문장들은 제외하고 발화자의 발언만 출력하라."""
         else:
             # 후속 라운드 - 반박
             last_progressive = self._get_last_progressive_statement(previous_statements)
             
-            prompt = f"""{self.system_prompt}
+            prompt = f"""너는 국민의힘 소속 보수 정치인이다. 다음 특징을 가져라:
+- "안타깝게도..." "그러나..." 같은 상황 인식 후 반박
+- 재정 부담과 장기적 부작용 경고
+- 성공 사례와 경험적 근거 제시
 
 토론 주제: {topic}
 라운드: {round_number}
 
-이전 맥락: {context}
-
 진보 측 주장: "{last_progressive}"
 
 위 진보 주장을 체계적으로 반박하며 보수 입장을 강화하라:
-
 1) 상대방 인식 후 반박 시작
 2) 재정 부담이나 시장 왜곡 문제 지적
 3) 구체적 수치나 경험 사례로 반증
-4) 장기적 관점에서의 부작용 경고
-5) "이 점 말씀드리고..." 식으로 체계적 마무리
 
-설득력 있고 책임감 있는 어조로 반박하라.
+설득력 있고 책임감 있는 어조로 반박하라. 
 
-보수 반박:"""
+입력과 think 등의 불필요한 문장들은 제외하고 발화자의 발언만 출력하라."""
         
-        return self.generate_response(prompt, max_length=200)
+        return self.generate_response(prompt)
 
     def _build_context(self, statements: List[Dict]) -> str:
         if not statements:

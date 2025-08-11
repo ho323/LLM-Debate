@@ -45,8 +45,11 @@ def main():
     parser.add_argument('--rounds', '-r', type=int, default=3,
                        help='토론 라운드 수 (기본값: 3)')
     parser.add_argument('--model', '-m', type=str,
-                       default='Bllossom/llama-3.2-Korean-Bllossom-3B',
-                       help='사용할 Hugging Face 모델')
+                       default='/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf',
+                       help='사용할 GGUF 모델 경로')
+    parser.add_argument('--llama-cli', type=str,
+                       default='./llama.cpp/build/bin/llama-cli',
+                       help='llama-cli 실행 파일 경로')
     parser.add_argument('--interactive', '-i', action='store_true',
                        help='대화형 모드로 실행')
     parser.add_argument('--auto', '-a', action='store_true',
@@ -56,13 +59,14 @@ def main():
     
     # 토론 매니저 초기화
     try:
-        debate_manager = DebateManager(model_name=args.model)
+        debate_manager = DebateManager(model_path=args.model)
         debate_manager.max_rounds = args.rounds
         
         print(f"🤖 진보 vs 보수 토론을 시작합니다...")
         print(f"📝 주제: {args.topic}")
         print(f"🔄 라운드: {args.rounds}")
         print(f"🧠 모델: {args.model}")
+        print(f"🔧 llama-cli: {args.llama_cli}")
         
         if args.auto:
             # 자동 모드
@@ -74,9 +78,10 @@ def main():
     except Exception as e:
         print(f"❌ 오류 발생: {e}")
         print("💡 가능한 해결 방법:")
-        print("  1. 인터넷 연결 확인")
-        print("  2. Hugging Face 모델 이름 확인")
-        print("  3. 시스템 리소스 확인")
+        print("  1. GGUF 모델 파일 경로 확인")
+        print("  2. llama-cli 실행 파일 경로 확인")
+        print("  3. llama.cpp 빌드 확인")
+        print("  4. 시스템 리소스 확인")
         sys.exit(1)
 
 def run_auto_debate(debate_manager: DebateManager, topic: str):
