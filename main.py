@@ -40,7 +40,7 @@ def save_debate_results(results: Dict, topic: str):
 def main():
     parser = argparse.ArgumentParser(description='AI 정치 토론 시스템 (진보 vs 보수)')
     parser.add_argument('--topic', '-t', type=str, 
-                       default='민생경제 회복을 위한 정부 역할과 정책 방향',
+                       default='민생회복 소비쿠폰에 대한 입장',
                        help='토론 주제')
     parser.add_argument('--rounds', '-r', type=int, default=3,
                        help='토론 라운드 수 (기본값: 3)')
