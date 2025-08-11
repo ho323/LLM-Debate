@@ -1,10 +1,13 @@
 from typing import Dict, List
 from .base_agent import BaseAgent
+from utils.rag_system import RAGSystem
+from typing import Optional
 
 class ProgressiveAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B', rag_system: Optional[RAGSystem] = None):
         super().__init__(model_name)
         self.stance = "진보"
+        self.rag_system = rag_system
         # 실제 민주당 토론자(김한규)의 말투와 성향 반영
         self.system_prompt = """너는 더불어민주당 소속 진보 정치인이다. 다음과 같은 특징을 가져라:
 
@@ -46,11 +49,23 @@ KDI는 1차 재난지원금의 26~36%가 매출 증대로 이어졌다고 분석
         # 이전 발언들로부터 맥락 파악
         context = self._build_context(previous_statements)
         
+        # RAG 시스템을 통한 관련 기사 검색(진보 시각)
+        evidence_text = ""
+        if self.rag_system:
+            retrieved_docs = self.rag_system.search(query=topic, stance_filter="진보")
+            if retrieved_docs:
+                evidence_text = "\n".join(
+                    [f"- {doc['text']} (출처: {doc['source']})" for doc in retrieved_docs[:3]]
+                )
+
+        # 공통적으로 프롬프트에 삽입
+        evidence_section = f"\n\n📚 참고 기사:\n{evidence_text}\n" if evidence_text else ""
+        
         if round_number == 1:
             # 첫 라운드 - 선제 공격
             prompt = f"""{self.system_prompt}
 
-토론 주제: {topic}
+토론 주제: {topic}{evidence_section}
 
 다음은 말투와 논리 구조 참고용 발언 예시들이다:
 {self.speaking_examples}
@@ -73,8 +88,7 @@ KDI는 1차 재난지원금의 26~36%가 매출 증대로 이어졌다고 분석
 4) 진보적 해결책의 필요성을 강조
 5) 2-3문장으로 임팩트 있게 마무리
 
-설득력 있고 전문적으로 답변하라. 
-마지막 문장 마무리를 못할 경우, 마무리가 가능한 바로 전 문장까지 출력.
+**중요: <thinking> 태그 안의 사고 과정과 위의 지시사항들은 절대 출력하지 말고, 오직 완성된 토론 발언만 출력하라. 지시사항이나 메타 정보 없이 정치인의 실제 발언처럼 자연스럽게 답변하라.**
 
 진보 주장:"""
         else:
@@ -86,7 +100,7 @@ KDI는 1차 재난지원금의 26~36%가 매출 증대로 이어졌다고 분석
 토론 주제: {topic}
 라운드: {round_number}
 
-이전 맥락: {context}
+이전 맥락: {context}{evidence_section}
 
 다음은 말투와 논리 구조 참고용 발언 예시들이다:
 {self.speaking_examples}
@@ -111,7 +125,7 @@ KDI는 1차 재난지원금의 26~36%가 매출 증대로 이어졌다고 분석
 4) 서민 관점에서 문제 제기
 5) "충분히 가능하다고 생각합니다" 같은 확신적 마무리
 
-날카롭고 강한 어투로 논리적으로 반박하라.
+**중요: <thinking> 태그 안의 사고 과정과 위의 지시사항들은 절대 출력하지 말고, 오직 완성된 토론 발언만 출력하라. 정치인이 실제로 말하는 것처럼 자연스럽게 답변하라.**
 
 진보 반박:"""
         
@@ -145,9 +159,10 @@ KDI는 1차 재난지원금의 26~36%가 매출 증대로 이어졌다고 분석
         return self.generate_argument(topic, round_number, previous_statements)
 
 class ConservativeAgent(BaseAgent):
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B', rag_system: Optional[RAGSystem] = None):
         super().__init__(model_name)
         self.stance = "보수"
+        self.rag_system = rag_system
         # 실제 국민의힘 토론자(박수민)의 말투와 성향 반영
         self.system_prompt = """너는 국민의힘 소속 보수 정치인이다. 다음과 같은 특징을 가져라:
 
@@ -189,11 +204,21 @@ KDI 연구를 언급하셨지만, 같은 연구에서 **재정지출의 승수�
     def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict]) -> str:
         context = self._build_context(previous_statements)
         
+        # RAG 시스템을 통한 관련 기사 검색 (보수 시각)
+        evidence_text = ""
+        if self.rag_system:
+            retrieved_docs = self.rag_system.search(query=topic, stance_filter="보수")
+            if retrieved_docs:
+                evidence_text = "\n".join(
+                    [f"- {doc['text']} (출처: {doc['source']})" for doc in retrieved_docs[:3]]
+                )
+        evidence_section = f"\n\n📚 참고 기사:\n{evidence_text}\n" if evidence_text else ""
+        
         if round_number == 1:
             # 첫 라운드 - 기조 발언
             prompt = f"""{self.system_prompt}
 
-토론 주제: {topic}
+토론 주제: {topic}{evidence_section}
 
 다음은 말투와 논리 구조 참고용 발언 예시들이다:
 {self.speaking_examples}
@@ -216,7 +241,7 @@ KDI 연구를 언급하셨지만, 같은 연구에서 **재정지출의 승수�
 4) 시장경제와 재정 건전성의 중요성 강조
 5) "저희는... 하겠습니다" 같은 의지 표명으로 마무리
 
-국정 경험과 책임감이 느껴지도록 답변하라.
+**중요: <thinking> 태그 안의 사고 과정과 위의 지시사항들은 절대 출력하지 말고, 오직 완성된 토론 발언만 출력하라. 정치인이 실제로 말하는 것처럼 자연스럽게 답변하라.**
 
 보수 주장:"""
         else:
@@ -228,7 +253,7 @@ KDI 연구를 언급하셨지만, 같은 연구에서 **재정지출의 승수�
 토론 주제: {topic}
 라운드: {round_number}
 
-이전 맥락: {context}
+이전 맥락: {context}{evidence_section}
 
 다음은 말투와 논리 구조 참고용 발언 예시들이다:
 {self.speaking_examples}
@@ -243,8 +268,7 @@ KDI 연구를 언급하셨지만, 같은 연구에서 **재정지출의 승수�
 4) 장기적 관점에서의 부작용 경고
 5) "이 점 말씀드리고..." 식으로 체계적 마무리
 
-설득력 있고 전문적으로 답변하라. 
-마지막 문장 마무리를 못할 경우, 마무리가 가능한 바로 전 문장까지 출력.
+**중요: 위의 지시사항들은 절대 출력하지 말고, 오직 완성된 토론 발언만 출력하라. 정치인이 실제로 말하는 것처럼 자연스럽게 답변하라.**
 
 보수 반박:"""
         

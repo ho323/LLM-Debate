@@ -5,14 +5,18 @@ from agents import (
     ModeratorAgent, 
     SummaryAgent
 )
+from utils.rag_system import RAGSystem
 
 class DebateManager:
-    def __init__(self, model_name: str = 'Bllossom/llama-3.2-Korean-Bllossom-3B'):
+    def __init__(self, model_name: str, rag_system: Optional[RAGSystem] = None):
         print("토론 시스템 초기화 중...")
         
+        # RAGsystem 전달
+        self.rag_system = rag_system
+
         # 에이전트들 초기화 (진보 vs 보수만)
-        self.progressive_agent = ProgressiveAgent(model_name)
-        self.conservative_agent = ConservativeAgent(model_name)
+        self.progressive_agent = ProgressiveAgent(model_name=model_name, rag_system=rag_system)
+        self.conservative_agent = ConservativeAgent(model_name=model_name, rag_system=rag_system)
         self.moderator_agent = ModeratorAgent(model_name)
         self.summary_agent = SummaryAgent(model_name)
         
