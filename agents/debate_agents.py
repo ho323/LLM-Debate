@@ -272,7 +272,7 @@ KDI 연구를 언급하셨지만, 같은 연구에서 **재정지출의 승수�
 
 보수 반박:"""
         
-        return self.generate_response(prompt, max_length=200)
+        return self.generate_response(prompt, max_length=500)
 
     def _build_context(self, statements: List[Dict]) -> str:
         if not statements:
