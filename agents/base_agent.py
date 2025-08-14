@@ -45,22 +45,41 @@ class BaseAgent(ABC):
             
             try:
                 # llama-cli로 모델 실행
+                # result = subprocess.run(
+                #     [
+                #         self.llama_cli_path,
+                #         "-m", self.model_path,
+                #         "-fa",
+                #         "-ngl", "65",  # GPU 레이어 수
+                #         "--temp", "0.8",
+                #         "--top-p", "0.9",
+                #         "--repeat-penalty", "1.1",
+                #         "-f", input_file,
+                #         "-n", str(max_length),  # 최대 토큰 수
+                #         "-no-cnv"
+                #     ],
+                #     capture_output=True,
+                #     text=True,
+                #     timeout=300  # 5분 타임아웃
+                # )
                 result = subprocess.run(
                     [
                         self.llama_cli_path,
                         "-m", self.model_path,
                         "-fa",
-                        "-ngl", "65",  # GPU 레이어 수
-                        "--temp", "0.8",
-                        "--top-p", "0.9",
+                        "-ngl", "65",
+                        "--temp", "0",            # 무작위성 제거
+                        "--top-p", "1.0",         # 컷오프 없음
                         "--repeat-penalty", "1.1",
+                        # "--repeat-last-n", "256",     # 최근 토큰 길이 넉넉히
                         "-f", input_file,
-                        "-n", str(max_length),  # 최대 토큰 수
-                        "-no-cnv"
+                        "-n", str(max_length),
+                        "-no-cnv",
+                        "--seed", "42"            # 난수 시드 고정
                     ],
                     capture_output=True,
                     text=True,
-                    timeout=300  # 5분 타임아웃
+                    timeout=300
                 )
                 
                 if result.returncode != 0:
@@ -88,8 +107,14 @@ class BaseAgent(ABC):
         marker = "</think>"
         idx = lower_out.rfind(marker)
         if idx != -1:
-            return output[idx + len(marker):].strip()
-        return output.strip()
+            result = output[idx + len(marker):].strip()
+        else:
+            result = output.strip()
+        
+        # [end of text] 토큰 제거
+        result = result.replace("[end of text]", "").replace("[END OF TEXT]", "").strip()
+        
+        return result
     
     def _clean_response(self, response: str) -> str:
         """응답을 정리합니다 (반복 제거, 불완전 문장 처리)."""

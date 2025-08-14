@@ -35,10 +35,7 @@ python main.py --interactive
 ### 4. 고급 옵션
 ```bash
 # 라운드 수 조정
-python main.py --rounds 5 --topic "기본소득 정책"
-
-# 다른 모델 사용
-python main.py --model "beomi/KoAlpaca-Polyglot-5.8B"
+python main.py --rounds 5 --topic "민생회복 소비쿠폰 도입에 대한 토론"
 ```
 
 ## 📊 시스템 구성
@@ -124,9 +121,9 @@ LLM-Debate/
 
 ### 기본 설정
 - **기본 라운드**: 3라운드
-- **기본 모델**: `Bllossom/llama-3.2-Korean-Bllossom-3B`
+- **기본 모델**: `EXAONE-4.0-32B-Q4_K_M.gguf`
 - **언어**: 한국어
 
 ### 모델 변경
 지원되는 한국어 모델들:
-- `Bllossom/llama-3.2-Korean-Bllossom-3B`
+- `EXAONE-4.0-32B-Q4_K_M.gguf`

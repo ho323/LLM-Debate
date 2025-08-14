@@ -59,7 +59,7 @@ class DebateManager:
             'status': 'completed'
         }
         
-        print(f"\n--- 라운드 {self.round_count} ---")
+        # print(f"\n--- 라운드 {self.round_count} ---")
         
         # 진보 측 발언
         progressive_statement = self.progressive_agent.generate_argument(

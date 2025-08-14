@@ -20,22 +20,77 @@ def ensure_results_dir():
     return results_dir
 
 def save_debate_results(results: Dict, topic: str):
-    """토론 결과를 debate_results 폴더에 저장합니다."""
+    """토론 결과를 debate_results 폴더에 JSON과 MD로 저장합니다."""
     # 결과 저장 디렉토리 확인/생성
     results_dir = ensure_results_dir()
     
-    # 파일명 생성 (주제_날짜시간.json)
+    # 파일명 생성 (주제_날짜시간)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     topic_slug = topic.replace(" ", "_")[:30]  # 주제를 파일명에 적합하게 변환
-    filename = f"{topic_slug}_{timestamp}.json"
-    filepath = os.path.join(results_dir, filename)
+    base_filename = f"{topic_slug}_{timestamp}"
+    
+    # JSON 파일 저장
+    json_filename = f"{base_filename}.json"
+    json_filepath = os.path.join(results_dir, json_filename)
     
     try:
-        with open(filepath, 'w', encoding='utf-8') as f:
+        with open(json_filepath, 'w', encoding='utf-8') as f:
             json.dump(results, f, ensure_ascii=False, indent=2)
-        print(f"결과가 저장되었습니다: {filepath}")
+        print(f"JSON 결과가 저장되었습니다: {json_filepath}")
     except Exception as e:
-        print(f"파일 저장 중 오류 발생: {e}")
+        print(f"JSON 파일 저장 중 오류 발생: {e}")
+    
+    # MD 파일 저장
+    md_filename = f"{base_filename}.md"
+    md_filepath = os.path.join(results_dir, md_filename)
+    
+    try:
+        with open(md_filepath, 'w', encoding='utf-8') as f:
+            f.write(f"=== AI 정치 토론 결과 ===\n")
+            f.write(f"주제: {topic}\n")
+            f.write(f"날짜: {datetime.now().strftime('%Y년 %m월 %d일 %H:%M:%S')}\n")
+            f.write(f"총 라운드: {results.get('metadata', {}).get('total_rounds', 'N/A')}\n")
+            f.write("=" * 50 + "\n\n")
+            
+            # 시작 결과
+            if 'start_result' in results:
+                f.write("🎯 토론 시작\n")
+                f.write(f"사회자: {results['start_result'].get('moderator_intro', '')}\n\n")
+            
+            # 라운드별 결과
+            if 'round_results' in results:
+                f.write("🔄 라운드별 토론\n")
+                f.write("-" * 30 + "\n")
+                for i, round_result in enumerate(results['round_results'], 1):
+                    f.write(f"\n--- 라운드 {i} ---\n")
+                    if 'progressive_statement' in round_result:
+                        f.write(f"🔵 진보: {round_result['progressive_statement']}\n\n")
+                    if 'conservative_statement' in round_result:
+                        f.write(f"🔴 보수: {round_result['conservative_statement']}\n\n")
+            
+            # 요약 결과
+            if 'summary_result' in results:
+                f.write("\n📊 토론 요약\n")
+                f.write("-" * 30 + "\n")
+                if 'moderator_conclusion' in results['summary_result']:
+                    f.write(f"🎯 사회자 마무리: {results['summary_result']['moderator_conclusion']}\n\n")
+                if 'summary' in results['summary_result']:
+                    f.write(f"📋 상세 요약:\n{results['summary_result']['summary']}\n\n")
+            
+            # 통계 정보
+            f.write("\n📈 토론 통계\n")
+            f.write("-" * 30 + "\n")
+            if 'metadata' in results:
+                metadata = results['metadata']
+                f.write(f"총 발언 수: {metadata.get('total_statements', 'N/A')}건\n")
+                f.write(f"진보 측 발언: {metadata.get('progressive_statements', 'N/A')}건\n")
+                f.write(f"보수 측 발언: {metadata.get('conservative_statements', 'N/A')}건\n")
+            
+            f.write(f"\n=== 토론 종료 ===\n")
+            
+        print(f"MD 결과가 저장되었습니다: {md_filepath}")
+    except Exception as e:
+        print(f"MD 파일 저장 중 오류 발생: {e}")
 
 def main():
     parser = argparse.ArgumentParser(description='AI 정치 토론 시스템 (진보 vs 보수)')
