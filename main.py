@@ -100,10 +100,10 @@ def main():
     parser.add_argument('--rounds', '-r', type=int, default=3,
                        help='토론 라운드 수 (기본값: 3)')
     parser.add_argument('--model', '-m', type=str,
-                       default='/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf',
+                       default='C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf',
                        help='사용할 GGUF 모델 경로')
     parser.add_argument('--llama-cli', type=str,
-                       default='./llama.cpp/build/bin/llama-cli',
+                       default='C:/Users/User/LLM-Debate/llama.cpp/build/bin/Release/llama-cli.exe',
                        help='llama-cli 실행 파일 경로')
     parser.add_argument('--interactive', '-i', action='store_true',
                        help='대화형 모드로 실행')

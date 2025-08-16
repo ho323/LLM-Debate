@@ -7,7 +7,7 @@ from agents import (
 )
 
 class DebateManager:
-    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf'):
         print("토론 시스템 초기화 중...")
         
         # 에이전트들 초기화 (진보 vs 보수만)

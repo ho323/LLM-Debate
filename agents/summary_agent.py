@@ -2,7 +2,7 @@ from typing import Dict, List
 from .base_agent import BaseAgent
 
 class SummaryAgent(BaseAgent):
-    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf'):
         super().__init__(model_path)
         # 실제 방송사나 언론기관의 정책토론회 요약 스타일 반영
         self.system_prompt = """너는 중립적 정책 분석 전문가다. 다음과 같은 특징으로 토론을 요약하라:

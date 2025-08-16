@@ -2,7 +2,7 @@ from typing import Dict, List
 from .base_agent import BaseAgent
 
 class ModeratorAgent(BaseAgent):
-    def __init__(self, model_path: str = '/home/ho/Documents/금융ai/models/EXAONE-4.0-32B-Q4_K_M.gguf'):
+    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf'):
         super().__init__(model_path)
         self.system_prompt = """너는 중립적 토론 사회자다. 다음을 철저히 지켜라.
 
