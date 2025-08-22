@@ -11,6 +11,7 @@ from typing import Dict, List
 from datetime import datetime
 import json
 from debate_manager import DebateManager
+from utils.rag_system import RAGSystem
 
 def ensure_results_dir():
     """결과 저장 디렉토리를 생성합니다."""
