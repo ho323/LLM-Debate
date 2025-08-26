@@ -2,8 +2,11 @@ from typing import Dict, List, Tuple, Optional, Set
 from .base_agent import BaseAgent
 from utils.rag_system import RAGSystem
 import re
+import numpy as np
 from dataclasses import dataclass
 from datetime import datetime
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 @dataclass
 class EvidenceItem:
@@ -14,6 +17,7 @@ class EvidenceItem:
     confidence: float
     timestamp: datetime
     stance: str
+    vector: np.ndarray
 
 class EnhancedEvidenceTracker:
     """실제 토론 데이터 기반 강화된 근거 추적 시스템"""
@@ -141,6 +145,11 @@ class EnhancedEvidenceTracker:
                 "재정학회 연구", "한국조세재정연구원 분석"
             ]
         }
+        self.vectorizer = TfidfVectorizer(
+            analyzer="char_wb",
+            ngram_range=(3, 5),  # 3~5자 n-gram
+            min_df=1
+        )
     
     def extract_evidence(self, statement: str) -> Dict[str, List[str]]:
         """강화된 근거 추출"""
@@ -179,56 +188,73 @@ class EnhancedEvidenceTracker:
         
         return normalized
     
+    def _to_vec(self, texts: List[str]) -> np.ndarray:
+        # 사전 학습 말고 on-the-fly로 벡터화: 비교 집합을 동시 변환
+        return self.vectorizer.fit_transform(texts)
+
     def calculate_similarity(self, text1: str, text2: str) -> float:
-        """두 근거의 유사도 계산"""
-        # 간단한 토큰 기반 유사도
-        tokens1 = set(text1.lower().split())
-        tokens2 = set(text2.lower().split())
-        
-        if not tokens1 or not tokens2:
-            return 0.0
-        
-        intersection = tokens1.intersection(tokens2)
-        union = tokens1.union(tokens2)
-        
-        return len(intersection) / len(union) if union else 0.0
+        corpus = [text1, text2]
+        X = self._to_vec(corpus)
+        sim = float(cosine_similarity(X[0], X[1])[0][0])
+        return sim
     
     def record_used_evidence(self, statement: str, stance: str):
-        """사용된 근거를 정교하게 기록"""
         evidence = self.extract_evidence(statement)
         timestamp = datetime.now()
-        
+
         for category, items in evidence.items():
             for item in items:
                 normalized = self.normalize_evidence(item, category)
-                if normalized and len(normalized) > 2:  # 너무 짧은 것 제외
-                    
-                    # 유사한 근거가 이미 있는지 확인
+                if normalized and len(normalized) > 2:
                     existing_key = self._find_similar_evidence(normalized, stance, category)
-                    
                     if existing_key:
-                        # 기존 근거 업데이트 (사용 빈도 추가)
                         self.used_evidence[stance][existing_key].timestamp = timestamp
                     else:
-                        # 새로운 근거 추가
+                        # 새 항목 벡터를 만들기 위해 비교군과 함께 fit_transform
+                        all_texts = [normalized] + [k for k, v in self.used_evidence[stance].items() if v.category == category]
+                        X = self._to_vec(all_texts)
+                        vec = X[0].toarray()[0]
                         evidence_item = EvidenceItem(
                             text=item,
                             category=category,
                             normalized=normalized,
                             confidence=self._calculate_confidence(item, category),
                             timestamp=timestamp,
-                            stance=stance
+                            stance=stance,
+                            vector=vec,
                         )
                         self.used_evidence[stance][normalized] = evidence_item
     
-    def _find_similar_evidence(self, normalized: str, stance: str, category: str, threshold: float = 0.8) -> str:
-        """유사한 근거가 이미 존재하는지 확인"""
-        for existing_key, evidence_item in self.used_evidence[stance].items():
-            if evidence_item.category == category:
-                similarity = self.calculate_similarity(normalized, existing_key)
-                if similarity >= threshold:
-                    return existing_key
-        return None
+    def _find_similar_evidence(self, normalized: str, stance: str, category: str, threshold: float = 0.80) -> str:
+        # 비교 대상들이 이미 저장되어 있다면, 같은 벡터 공간으로 변환해야 함
+        candidates = [(k, v) for k, v in self.used_evidence[stance].items() if v.category == category]
+        if not candidates:
+            return None
+        corpus = [normalized] + [k for k, _ in candidates]
+        X = self._to_vec(corpus)
+        sims = cosine_similarity(X[0], X[1:])[0]
+        best_idx = int(np.argmax(sims))
+        best_sim = float(sims[best_idx])
+        return candidates[best_idx][0] if best_sim >= threshold else None
+
+    def check_evidence_conflict(self, statement: str, stance: str) -> Tuple[bool, List[str]]:
+        opponent_stance = "보수" if stance == "진보" else "진보"
+        evidence = self.extract_evidence(statement)
+        conflicting_evidence = []
+        for category, items in evidence.items():
+            opp_candidates = [(k, v) for k, v in self.used_evidence[opponent_stance].items() if v.category == category]
+            for item in items:
+                normalized = self.normalize_evidence(item, category)
+                if normalized in self.used_evidence[opponent_stance]:
+                    conflicting_evidence.append(item)
+                    continue
+                if opp_candidates:
+                    corpus = [normalized] + [k for k, _ in opp_candidates]
+                    X = self._to_vec(corpus)
+                    sims = cosine_similarity(X[0], X[1:])[0]
+                    if float(np.max(sims)) >= 0.78:  # TF-IDF는 임계값을 약간 낮추는 편이 실용적
+                        conflicting_evidence.append(item)
+        return (len(conflicting_evidence) > 0, conflicting_evidence)
     
     def _calculate_confidence(self, text: str, category: str) -> float:
         """근거의 신뢰도 점수 계산"""
@@ -248,32 +274,6 @@ class EnhancedEvidenceTracker:
             confidence += 0.1
             
         return min(confidence, 1.0)
-    
-    def check_evidence_conflict(self, statement: str, stance: str) -> Tuple[bool, List[str]]:
-        """정교한 근거 중복 검사"""
-        opponent_stance = "보수" if stance == "진보" else "진보"
-        evidence = self.extract_evidence(statement)
-        
-        conflicting_evidence = []
-        
-        for category, items in evidence.items():
-            for item in items:
-                normalized = self.normalize_evidence(item, category)
-                
-                # 1. 정확히 동일한 근거 확인
-                if normalized in self.used_evidence[opponent_stance]:
-                    conflicting_evidence.append(item)
-                    continue
-                
-                # 2. 유사도 기반 중복 확인
-                for opp_key, opp_evidence in self.used_evidence[opponent_stance].items():
-                    if opp_evidence.category == category:
-                        similarity = self.calculate_similarity(normalized, opp_key)
-                        if similarity >= 0.7:  # 70% 이상 유사하면 중복으로 간주
-                            conflicting_evidence.append(item)
-                            break
-        
-        return len(conflicting_evidence) > 0, conflicting_evidence
     
     def get_alternative_evidence_prompt(self, conflicting_items: List[str], stance: str) -> str:
         """맥락에 맞는 대안 근거 제안"""
