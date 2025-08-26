@@ -1,133 +1,404 @@
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Dict, List, Tuple, Optional, Set
 from .base_agent import BaseAgent
 from utils.rag_system import RAGSystem
-import hashlib
 import re
+from dataclasses import dataclass
+from datetime import datetime
 
-SELF_CONSTRAINTS = """
-스타일 규율:
-- 한 단락 5~7문장으로 끝낸다. 나열형 접속사(예: 첫째, 둘째, 셋째, 또한, 더불어, 마지막으로)를 쓰지 않는다.
-- '입니다/합니다'의 정중체를 유지하되, 마지막 문장은 분명한 요구/검증 요청/목표 제시로 날을 세운다.
-- 숫자는 1~2개만 사용하고, 같은 숫자·사례를 라운드마다 반복하지 않는다.
+@dataclass
+class EvidenceItem:
+    """개별 근거 항목"""
+    text: str
+    category: str
+    normalized: str
+    confidence: float
+    timestamp: datetime
+    stance: str
 
-클러시(Clash) 구조(문장 흐름 고정):
-1) 상대 주장 핵심 1문장을 요약한다(스틸맨, 왜곡 금지).
-2) 그 주장에 깔린 가정 1가지를 짚고 거기에 반례 또는 결손을 꽂는다(핵심만).
-3) 새로운 근거 1~2개(데이터/사례)를 제시한다(이전 라운드와 중복 금지).
-4) 정책 트레이드오프를 명시하며 우리 해법이 더 나은 이유를 한 줄로 대비한다.
-5) 검증 가능한 요구 또는 행동 촉구로 강하게 마무리한다.
-
-금지 목록:
-- '첫째/둘째/셋째/마지막으로/한편' 등 열거체, 불릿, 목록, 괄호 시작, 이모지.
-- '종합하면/요컨대' 같은 발표체 결론 남발.
-"""
-
-class ArgumentTracker:
-    """발언 추적 및 중복 방지 클래스"""
+class EnhancedEvidenceTracker:
+    """실제 토론 데이터 기반 강화된 근거 추적 시스템"""
     
     def __init__(self):
-        self.used_evidence = set()  # 사용된 근거 해시 저장
-        self.used_arguments = set()  # 사용된 논거 해시 저장
-        self.keyword_usage = {}  # 키워드별 사용 횟수
-        self.evidence_sources = set()  # 사용된 출처들
+        self.used_evidence = {
+            "진보": {}, 
+            "보수": {}
+        }
         
-    def add_evidence(self, evidence_text: str, source: str) -> None:
-        """사용된 근거와 출처를 추가"""
-        try:
-            if evidence_text and len(evidence_text.strip()) > 0:
-                evidence_hash = hashlib.md5(evidence_text.encode('utf-8')).hexdigest()
-                self.used_evidence.add(evidence_hash)
-            if source and len(source.strip()) > 0:
-                self.evidence_sources.add(source)
-        except Exception as e:
-            print(f"근거 추가 중 오류: {e}")
-        
-    def add_argument(self, argument: str) -> None:
-        """사용된 논거를 추가"""
-        try:
-            if not argument or len(argument.strip()) == 0:
-                return
-                
-            # 핵심 키워드 추출하여 빈도 체크
-            keywords = self._extract_keywords_safe(argument)
-            for keyword in keywords:
-                if keyword and len(keyword.strip()) > 0:
-                    self.keyword_usage[keyword] = self.keyword_usage.get(keyword, 0) + 1
-                
-            argument_hash = hashlib.md5(argument.encode('utf-8')).hexdigest()
-            self.used_arguments.add(argument_hash)
-        except Exception as e:
-            print(f"논거 추가 중 오류: {e}")
-    
-    def is_evidence_used(self, evidence_text: str) -> bool:
-        """근거가 이미 사용되었는지 확인"""
-        try:
-            if not evidence_text or len(evidence_text.strip()) == 0:
-                return False
-            evidence_hash = hashlib.md5(evidence_text.encode('utf-8')).hexdigest()
-            return evidence_hash in self.used_evidence
-        except Exception:
-            return False
-    
-    def is_source_overused(self, source: str, max_usage: int = 2) -> bool:
-        """특정 출처가 과도하게 사용되었는지 확인"""
-        try:
-            if not source or len(source.strip()) == 0:
-                return False
-            return list(self.evidence_sources).count(source) >= max_usage
-        except Exception:
-            return False
-    
-    def get_keyword_frequency(self, keyword: str) -> int:
-        """특정 키워드의 사용 빈도 반환"""
-        return self.keyword_usage.get(keyword, 0)
-    
-    def _extract_keywords_safe(self, text: str) -> List[str]:
-        """안전한 키워드 추출"""
-        if not text or len(text.strip()) == 0:
-            return []
-        
-        try:
-            # 경제/정치 관련 주요 키워드 패턴
-            patterns = [
-                r'GDP|성장률|실업률|물가상승률|인플레이션|경기침체',
-                r'최저임금|소득불평등|중산층|서민|노동자',
-                r'재정지출|국가부채|세율|세수|예산',
-                r'규제완화|민영화|공기업|대기업|중소기업',
-                r'복지|연금|건강보험|교육비|의료비',
-                r'청년|일자리|취업|창업|고용',
-                r'부동산|집값|전세|월세|주택'
+        # 실제 토론에서 발견된 패턴을 반영한 강화된 정규식
+        self.evidence_patterns = {
+            # 통계 및 수치 (실제 토론에서 사용된 패턴들)
+            "statistics": [
+                r'(\d+(?:\.\d+)?%)',  # 백분율: 3.6%, 12%, 등
+                r'(GDP\s*대비\s*\d+(?:\.\d+)?%)',  # GDP 대비: GDP 대비 104%
+                r'(\d+(?:\.\d+)?조\s*원?)',  # 조 단위: 1조 원
+                r'(\d+(?:\.\d+)?억\s*원?)',  # 억 단위
+                r'(\d+(?:\.\d+)?%?p)',  # 포인트: 0.8%p, 2%포인트
+                r'(\d+(?:\.\d+)?배)',  # 배수: 3배
+                r'(평균\s*\d+(?:\.\d+)?%)',  # 평균: 평균 25%
+                r'(연평균\s*\d+(?:\.\d+)?%)',  # 연평균: 연평균 7%
+                r'(\d+년\s*내\s*최고치)',  # 기간: 10년 내 최고치
+            ],
+            
+            # 기관 및 출처 (동일 기관 다른 표기 통합)
+            "sources": [
+                r'(한국은행|BOK|중앙은행)',
+                r'(통계청|KOSTAT|국가통계포털)',  
+                r'(한국개발연구원|KDI)',  # 중요: KDI와 한국개발연구원 통합
+                r'(기획재정부|기재부|재정부)',
+                r'(OECD|경제협력개발기구)',
+                r'(IMF|국제통화기금)',
+                r'(국정감사|국감)',
+                r'(가계동향조사)',  # 누락되었던 중요 조사
+                r'(소비자물가지수|CPI)',  # 누락되었던 지표
+                r'(국세청)',
+                r'(전경련|한국경제인연합회)',
+                r'(한국경제연구원)',
+                r'(자유기업원)',
+                r'(노동연구원)',
+                r'(참여연대)',
+            ],
+            
+            # 국가 및 지역 사례
+            "examples": [
+                r'(독일[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(일본[\w\s]*(?:사례|모델|정책|경험|제도))', 
+                r'(미국[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(중국[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(프랑스[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(영국[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(스웨덴[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(덴마크[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(싱가포르[\w\s]*(?:사례|모델|정책|경험|제도))',
+                r'(\d{4}년[\w\s]*(?:사례|사례에서|당시))',  # 연도별 사례: 2021년 사례
+                r'(선진국\s*평균)',  # 누락되었던 비교 기준
+            ],
+            
+            # 정책 및 제도
+            "policies": [
+                r'(소비쿠폰[\w\s]*정책?)',
+                r'(기본소득[\w\s]*정책?)',  
+                r'(전국민고용보험)',
+                r'(그린뉴딜|한국판뉴딜)',
+                r'(규제샌드박스)',
+                r'(세제혜택|세제지원)',
+                r'(공공요금\s*동결)',  # 실제 토론에서 언급
+                r'(대기업\s*탈세\s*감시)',  # 실제 토론에서 언급
+                r'(구조\s*개혁)',  # 실제 토론에서 언급
+                r'(R&D\s*지원)',  # 실제 토론에서 언급
+                r'(규제완화|규제\s*완화)',
+                r'(재정\s*건전성)',  # 핵심 개념
+                r'(재정적자|재정\s*적자)',  # 누락되었던 중요 개념
+                r'(국가채무)',  # 누락되었던 중요 개념
+            ],
+            
+            # 경제 지표 (새로 추가된 카테고리)
+            "economic_indicators": [
+                r'(소비자물가\s*상승률)',
+                r'(기준금리)',
+                r'(가계대출\s*금리)',
+                r'(가계부채)',
+                r'(실질소득)',
+                r'(소비심리)',
+                r'(소비증가율)',
+                r'(매출\s*증가율)',  
+                r'(경제성장률)',
+                r'(소비\s*회복률)',
+                r'(물가\s*상승률)',
             ]
-            
-            keywords = []
+        }
+        
+        # 기관명 정규화 매핑 (동일 기관 다른 표기 통합)
+        self.institution_mapping = {
+            'kdi': '한국개발연구원',
+            '한국개발연구원': '한국개발연구원',
+            'bok': '한국은행', 
+            '한국은행': '한국은행',
+            '중앙은행': '한국은행',
+            'kostat': '통계청',
+            '통계청': '통계청',
+            '국가통계포털': '통계청',
+            '기재부': '기획재정부',
+            '기획재정부': '기획재정부',
+            '재정부': '기획재정부',
+            'oecd': 'OECD',
+            '경제협력개발기구': 'OECD',
+            'imf': 'IMF',
+            '국제통화기금': 'IMF',
+            'cpi': '소비자물가지수',
+            '소비자물가지수': '소비자물가지수'
+        }
+        
+        # 대안 근거 제안 (실제 토론 스타일 반영)
+        self.alternative_suggestions = {
+            "진보": [
+                "민주노총 자료", "참여연대 보고서", "경제사회노동위원회 분석",
+                "시민사회단체 연구", "진보정책연구소 자료", "한겨레경제사회연구원 보고서",
+                "노동연구원 통계", "사회정책연합 분석", "공공운수노조 조사"
+            ],
+            "보수": [
+                "전경련 경영자료", "한국경제연구원 보고서", "자유기업원 분석",
+                "대한상공회의소 조사", "중소기업중앙회 자료", "한국무역협회 통계",
+                "재정학회 연구", "한국조세재정연구원 분석"
+            ]
+        }
+    
+    def extract_evidence(self, statement: str) -> Dict[str, List[str]]:
+        """강화된 근거 추출"""
+        evidence = {category: [] for category in self.evidence_patterns.keys()}
+        
+        for category, patterns in self.evidence_patterns.items():
             for pattern in patterns:
-                try:
-                    matches = re.findall(pattern, text)
-                    if matches:
-                        keywords.extend([m for m in matches if m and len(m.strip()) > 0])
-                except Exception:
+                matches = re.findall(pattern, statement, re.IGNORECASE)
+                if matches:
+                    for match in matches:
+                        if match.strip():
+                            evidence[category].append(match.strip())
+        
+        return evidence
+    
+    def normalize_evidence(self, evidence_text: str, category: str = "") -> str:
+        """향상된 근거 정규화"""
+        normalized = evidence_text.lower().strip()
+        
+        # 기관명 통합
+        for variant, standard in self.institution_mapping.items():
+            if variant in normalized:
+                normalized = normalized.replace(variant, standard.lower())
+        
+        # 숫자 표기 통일
+        normalized = re.sub(r'(\d+)조\s*원?', r'\1조', normalized)
+        normalized = re.sub(r'(\d+)억\s*원?', r'\1억', normalized) 
+        normalized = re.sub(r'(\d+(?:\.\d+)?)%', r'\1%', normalized)
+        normalized = re.sub(r'(\d+(?:\.\d+)?)%?p', r'\1%p', normalized)
+        
+        # 연도 통합 (2021년, 21년 등)
+        normalized = re.sub(r'20(\d{2})년', r'20\1년', normalized)
+        
+        # 공백 정리
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+        
+        return normalized
+    
+    def calculate_similarity(self, text1: str, text2: str) -> float:
+        """두 근거의 유사도 계산"""
+        # 간단한 토큰 기반 유사도
+        tokens1 = set(text1.lower().split())
+        tokens2 = set(text2.lower().split())
+        
+        if not tokens1 or not tokens2:
+            return 0.0
+        
+        intersection = tokens1.intersection(tokens2)
+        union = tokens1.union(tokens2)
+        
+        return len(intersection) / len(union) if union else 0.0
+    
+    def record_used_evidence(self, statement: str, stance: str):
+        """사용된 근거를 정교하게 기록"""
+        evidence = self.extract_evidence(statement)
+        timestamp = datetime.now()
+        
+        for category, items in evidence.items():
+            for item in items:
+                normalized = self.normalize_evidence(item, category)
+                if normalized and len(normalized) > 2:  # 너무 짧은 것 제외
+                    
+                    # 유사한 근거가 이미 있는지 확인
+                    existing_key = self._find_similar_evidence(normalized, stance, category)
+                    
+                    if existing_key:
+                        # 기존 근거 업데이트 (사용 빈도 추가)
+                        self.used_evidence[stance][existing_key].timestamp = timestamp
+                    else:
+                        # 새로운 근거 추가
+                        evidence_item = EvidenceItem(
+                            text=item,
+                            category=category,
+                            normalized=normalized,
+                            confidence=self._calculate_confidence(item, category),
+                            timestamp=timestamp,
+                            stance=stance
+                        )
+                        self.used_evidence[stance][normalized] = evidence_item
+    
+    def _find_similar_evidence(self, normalized: str, stance: str, category: str, threshold: float = 0.8) -> str:
+        """유사한 근거가 이미 존재하는지 확인"""
+        for existing_key, evidence_item in self.used_evidence[stance].items():
+            if evidence_item.category == category:
+                similarity = self.calculate_similarity(normalized, existing_key)
+                if similarity >= threshold:
+                    return existing_key
+        return None
+    
+    def _calculate_confidence(self, text: str, category: str) -> float:
+        """근거의 신뢰도 점수 계산"""
+        confidence = 0.5  # 기본값
+        
+        # 구체적 수치가 있으면 점수 증가
+        if re.search(r'\d+', text):
+            confidence += 0.2
+        
+        # 권위 있는 기관명이 있으면 점수 증가  
+        authority_keywords = ['한국은행', '통계청', 'oecd', 'imf', 'kdi']
+        if any(keyword in text.lower() for keyword in authority_keywords):
+            confidence += 0.2
+            
+        # 최신 연도가 있으면 점수 증가
+        if re.search(r'202[0-9]년', text):
+            confidence += 0.1
+            
+        return min(confidence, 1.0)
+    
+    def check_evidence_conflict(self, statement: str, stance: str) -> Tuple[bool, List[str]]:
+        """정교한 근거 중복 검사"""
+        opponent_stance = "보수" if stance == "진보" else "진보"
+        evidence = self.extract_evidence(statement)
+        
+        conflicting_evidence = []
+        
+        for category, items in evidence.items():
+            for item in items:
+                normalized = self.normalize_evidence(item, category)
+                
+                # 1. 정확히 동일한 근거 확인
+                if normalized in self.used_evidence[opponent_stance]:
+                    conflicting_evidence.append(item)
                     continue
-            
-            # 중복 제거 및 정리
-            unique_keywords = list(set(keywords))
-            return unique_keywords[:10]  # 최대 10개만 반환
-            
-        except Exception as e:
-            print(f"키워드 추출 중 오류: {e}")
+                
+                # 2. 유사도 기반 중복 확인
+                for opp_key, opp_evidence in self.used_evidence[opponent_stance].items():
+                    if opp_evidence.category == category:
+                        similarity = self.calculate_similarity(normalized, opp_key)
+                        if similarity >= 0.7:  # 70% 이상 유사하면 중복으로 간주
+                            conflicting_evidence.append(item)
+                            break
+        
+        return len(conflicting_evidence) > 0, conflicting_evidence
+    
+    def get_alternative_evidence_prompt(self, conflicting_items: List[str], stance: str) -> str:
+        """맥락에 맞는 대안 근거 제안"""
+        if not conflicting_items:
+            return ""
+        
+        suggestions = self.alternative_suggestions.get(stance, [])[:4]
+        conflicting_text = ", ".join(conflicting_items[:3])  # 최대 3개만 표시
+        
+        warning = f"""
+⚠️ 근거 중복 경고: 다음 근거들은 상대방이 이미 사용했습니다
+   중복 근거: {conflicting_text}
+
+💡 {stance} 관점의 독립적 근거를 활용하세요:
+   추천 근거: {', '.join(suggestions)}
+
+📋 중복 방지 가이드:
+   • 같은 기관이라도 다른 시점의 자료를 사용하세요
+   • 상대방과 다른 해석 관점을 제시하세요  
+   • {stance} 성향 기관의 독립적 분석을 인용하세요
+   • 구체적인 데이터 제시하세요 
+"""
+        return warning
+
+class StatementMemoryManager:
+    """발언 메모리 관리를 위한 헬퍼 클래스"""
+    
+    def __init__(self, max_statements: int = 8):
+        self.max_statements = max_statements
+        
+    def summarize_statement(self, statement: str, agent) -> str:
+        """발언을 핵심 논점으로 요약"""
+        prompt = f"""다음 발언의 핵심 논점을 100자 근처로 요약해주세요:
+
+발언: "{statement}"
+
+핵심 논점만 간단히 정리하세요 (예: "재정정책 확대 필요", "시장경제 원리 강조"):"""
+        
+        summary = agent.generate_response(prompt)
+        return summary.strip() if summary else statement[:50]
+    
+    def detect_contradiction(self, new_statement: str, past_statement: str, agent) -> bool:
+        """새 발언이 과거 발언과 모순되는지 검증"""
+        prompt = f"""다음 두 발언이 서로 모순되는지 판단해주세요:
+
+과거 발언: "{past_statement}"
+새 발언: "{new_statement}"
+
+모순된다면 "YES", 모순되지 않는다면 "NO"로만 답해주세요:"""
+        
+        result = agent.generate_response(prompt)
+        return "YES" in result.upper() if result else False
+    
+    def extract_key_topics(self, statements: List[str], agent) -> List[str]:
+        """발언들에서 핵심 주제들을 추출"""
+        if not statements:
             return []
+            
+        combined_text = " ".join(statements[-3:])  # 최근 3개 발언만 사용
+        
+        prompt = f"""다음 발언들에서 핵심 주제 3개를 추출해주세요:
+
+발언들: "{combined_text}"
+
+핵심 주제만 간단히 나열하세요 (예: "재정정책", "일자리", "부동산"):"""
+        
+        result = agent.generate_response(prompt)
+        if result:
+            topics = [topic.strip() for topic in result.split(",")]
+            return topics[:3]
+        return []
+    
+    def manage_memory(self, statements: List[str], agent) -> List[Dict]:
+        """메모리를 효율적으로 관리"""
+        if len(statements) <= self.max_statements:
+            return [{"statement": stmt, "summary": self.summarize_statement(stmt, agent)} 
+                   for stmt in statements]
+        
+        # 중요도 기반 선별 (최근 발언 우선, 핵심 주제 포함 발언 우선)
+        managed_statements = []
+        
+        # 최근 6개는 무조건 포함
+        recent_statements = statements[-6:]
+        for stmt in recent_statements:
+            managed_statements.append({
+                "statement": stmt,
+                "summary": self.summarize_statement(stmt, agent),
+                "priority": "recent"
+            })
+        
+        # 나머지 중에서 핵심 주제 포함 발언 선별
+        older_statements = statements[:-6] if len(statements) > 6 else []
+        key_topics = self.extract_key_topics(statements, agent)
+        
+        for stmt in older_statements:
+            if any(topic.lower() in stmt.lower() for topic in key_topics):
+                managed_statements.append({
+                    "statement": stmt,
+                    "summary": self.summarize_statement(stmt, agent),
+                    "priority": "key_topic"
+                })
+                if len(managed_statements) >= self.max_statements:
+                    break
+        
+        return managed_statements
 
 class ProgressiveAgent(BaseAgent):
-    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf', rag_system: Optional[RAGSystem] = None):
+    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf', rag_system: Optional[RAGSystem] = None, evidence_tracker: Optional[EnhancedEvidenceTracker] = None):
         super().__init__(model_path)
         self.stance = "진보"
         self.rag_system = rag_system
+        self.memory_manager = StatementMemoryManager()
+        self.evidence_tracker = evidence_tracker or EnhancedEvidenceTracker()
+        
+        # 과거 발언 추적을 위한 저장소 (원본 + 관리된 버전)
         self.my_previous_statements = []
         self.opponent_previous_statements = []
+        self.my_managed_statements = []
+        self.opponent_managed_statements = []
         
-        # 중복 방지를 위한 추적기
-        self.argument_tracker = ArgumentTracker()
-        self.shared_tracker = None  # 공유 추적기 (상대방과 공유)
+        # 핵심 논점 추적
+        self.my_key_arguments = []
+        self.consistency_violations = []
         
+        # 실제 민주당 토론자(김한규)의 말투와 성향 반영
         self.system_prompt = """너는 더불어민주당 소속 진보 정치인이다. 다음과 같은 특징을 가져라:
 
 말투 특징:
@@ -136,6 +407,7 @@ class ProgressiveAgent(BaseAgent):
 - "저희가 보기에는..." "분명히... 있습니다" 같은 확신적 표현
 - 구체적 수치와 사례를 제시하는 실무적 접근
 - 상대방 정책의 문제점을 구체적으로 지적
+- "진보적" 과 같은 직접적 말은 빼기
 
 정책 성향:
 - 과감한 재정정책과 적극적 정부 역할 강조
@@ -166,355 +438,266 @@ class ProgressiveAgent(BaseAgent):
 5. 감정적 호소: 국민들의 공감을 얻을 수 있는 포인트는?
 </thinking>
 
-""" + SELF_CONSTRAINTS
+"""
 
-    def set_shared_tracker(self, shared_tracker: ArgumentTracker):
-        """상대방과 공유하는 추적기 설정"""
-        self.shared_tracker = shared_tracker
-
-    def _get_filtered_evidence(self, topic: str, max_docs: int = 5) -> List[Dict]:
-        """중복되지 않는 새로운 근거 검색"""
-        if not self.rag_system:
+    def update_statement_history(self, previous_statements: List[Dict]):
+        """발언 기록을 업데이트하고 메모리 관리"""
+        self.my_previous_statements = []
+        self.opponent_previous_statements = []
+        
+        for stmt in previous_statements:
+            statement_text = stmt.get('statement', '')
+            stance = stmt.get('stance', '')
+            
+            if stance == '진보':
+                self.my_previous_statements.append(statement_text)
+                # 내 발언의 근거를 기록
+                self.evidence_tracker.record_used_evidence(statement_text, '진보')
+            elif stance == '보수':
+                self.opponent_previous_statements.append(statement_text)
+                # 상대 발언의 근거를 기록
+                self.evidence_tracker.record_used_evidence(statement_text, '보수')
+        
+        # 메모리 관리 적용
+        if self.my_previous_statements:
+            self.my_managed_statements = self.memory_manager.manage_memory(
+                self.my_previous_statements, self)
+        
+        if self.opponent_previous_statements:
+            self.opponent_managed_statements = self.memory_manager.manage_memory(
+                self.opponent_previous_statements, self)
+    
+    def check_evidence_before_response(self, potential_statement: str) -> Tuple[bool, str]:
+        """근거 중복을 사전에 확인"""
+        has_conflict, conflicting_items = self.evidence_tracker.check_evidence_conflict(
+            potential_statement, self.stance)
+        
+        if has_conflict:
+            warning = self.evidence_tracker.get_alternative_evidence_prompt(
+                conflicting_items, self.stance)
+            return False, warning
+        
+        return True, ""
+    
+    def check_consistency_before_response(self, new_statement: str) -> Tuple[bool, str]:
+        """새 발언의 일관성을 검증"""
+        if not self.my_previous_statements:
+            return True, ""
+        
+        # 최근 3개 발언과 비교
+        recent_statements = self.my_previous_statements[-3:]
+        for past_stmt in recent_statements:
+            if self.memory_manager.detect_contradiction(new_statement, past_stmt, self):
+                warning = f"⚠️ 일관성 경고: 과거 발언 '{past_stmt[:50]}...'과 모순될 수 있습니다."
+                self.consistency_violations.append({
+                    "new": new_statement[:50],
+                    "conflicting": past_stmt[:50]
+                })
+                return False, warning
+        
+        return True, ""
+    
+    def get_my_key_arguments(self) -> List[str]:
+        """내 핵심 논점들을 반환"""
+        if not self.my_managed_statements:
             return []
         
-        try:
-            # 더 많은 문서를 검색하여 필터링 여지 확보
-            all_docs = self.rag_system.search(query=topic, stance_filter="진보", top_k=max_docs*2)
-            filtered_docs = []
-            
-            for doc in all_docs:
-                if not doc or not isinstance(doc, dict):
-                    continue
-                    
-                evidence_text = doc.get('text', '')
-                source = doc.get('source', '')
-                
-                # 중복 체크
-                if self.argument_tracker.is_evidence_used(evidence_text):
-                    continue
-                if self.shared_tracker and self.shared_tracker.is_evidence_used(evidence_text):
-                    continue
-                if self.argument_tracker.is_source_overused(source):
-                    continue
-                    
-                filtered_docs.append(doc)
-                if len(filtered_docs) >= max_docs:
-                    break
-                    
-            return filtered_docs
-        except Exception as e:
-            print(f"근거 검색 중 오류: {e}")
+        return [stmt["summary"] for stmt in self.my_managed_statements 
+                if stmt.get("priority") in ["recent", "key_topic"]]
+    
+    def get_opponent_key_arguments(self) -> List[str]:
+        """상대 핵심 논점들을 반환"""
+        if not self.opponent_managed_statements:
             return []
-
-    def _analyze_opponent_weakness_safe(self, opponent_statements: List[str]) -> Dict:
-        """상대방 발언의 약점과 모순점 분석 (안전한 버전)"""
-        # 기본 구조 초기화
-        analysis = {
-            'contradictions': [],
-            'weak_points': [],
-            'overused_arguments': [],
-            'missing_evidence': []
-        }
         
-        # 빈 리스트 체크
-        if not opponent_statements or len(opponent_statements) == 0:
-            return analysis
-        
-        try:
-            # 모순점 찾기 (더 정확한 키워드 매칭)
-            contradiction_pairs = [
-                (['규제완화', '완화'], ['시장개입', '개입', '정부역할']),
-                (['재정건전성', '건전성'], ['지원확대', '확대', '지출증가']),
-                (['민간주도', '민간'], ['정부역할', '정부주도', '국가개입']),
-            ]
-            
-            for stmt in opponent_statements:
-                if not stmt or len(stmt.strip()) == 0:
-                    continue
-                    
-                stmt_lower = stmt.lower()
-                
-                for pair in contradiction_pairs:
-                    left_keywords, right_keywords = pair
-                    
-                    # 각 그룹에서 키워드 발견 여부 확인
-                    left_found = any(keyword in stmt_lower for keyword in left_keywords)
-                    right_found = any(keyword in stmt_lower for keyword in right_keywords)
-                    
-                    if left_found and right_found:
-                        # 실제 발견된 키워드 찾기
-                        found_left = next((k for k in left_keywords if k in stmt_lower), left_keywords[0])
-                        found_right = next((k for k in right_keywords if k in stmt_lower), right_keywords[0])
-                        analysis['contradictions'].append(f"{found_left}와 {found_right} 모순")
-            
-            # 반복되는 논거 찾기 (안전한 키워드 추출)
-            keyword_counts = {}
-            for stmt in opponent_statements:
-                if not stmt or len(stmt.strip()) == 0:
-                    continue
-                    
-                try:
-                    keywords = self.argument_tracker._extract_keywords_safe(stmt)
-                    for keyword in keywords:
-                        if keyword and len(keyword.strip()) > 0:
-                            keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
-                except Exception:
-                    continue
-            
-            # 3번 이상 사용된 키워드를 반복 논거로 분류
-            overused = [k for k, v in keyword_counts.items() if v >= 3 and k]
-            analysis['overused_arguments'] = overused[:5]  # 최대 5개만
-            
-        except Exception as e:
-            print(f"상대방 약점 분석 중 오류: {e}")
-        
-        return analysis
+        return [stmt["summary"] for stmt in self.opponent_managed_statements 
+                if stmt.get("priority") in ["recent", "key_topic"]]
 
     def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict]) -> str:
-        """안전한 논증 생성 메서드"""
-        try:
-            # 발언 기록 업데이트
-            self.update_statement_history(previous_statements)
-            
-            # 상대방 약점 분석 (안전한 버전)
-            try:
-                opponent_analysis = self._analyze_opponent_weakness_safe(self.opponent_previous_statements)
-            except Exception as e:
-                print(f"상대방 분석 실패: {e}")
-                opponent_analysis = {
-                    'contradictions': [],
-                    'weak_points': [],
-                    'overused_arguments': [],
-                    'missing_evidence': []
-                }
-            
-            # 필터링된 근거 검색
-            try:
-                filtered_docs = self._get_filtered_evidence(topic)
-            except Exception as e:
-                print(f"근거 검색 실패: {e}")
-                filtered_docs = []
-            
-            # 근거 텍스트 생성
-            evidence_text = ""
-            selected_docs = []
-            if filtered_docs:
-                for doc in filtered_docs[:3]:
-                    try:
-                        if doc and isinstance(doc, dict) and 'text' in doc and 'source' in doc:
-                            evidence_text += f"- {doc['text']} (출처: {doc['source']})\n"
-                            selected_docs.append(doc)
-                    except Exception:
-                        continue
-            
-            evidence_section = f"\n\n📚 새로운 참고 기사:\n{evidence_text}" if evidence_text else ""
-            
-            # 과거 발언 요약
-            try:
-                my_statements_summary = self._summarize_previous_arguments(self.my_previous_statements)
-                opponent_statements_summary = self._summarize_previous_arguments(self.opponent_previous_statements)
-            except Exception as e:
-                print(f"발언 요약 실패: {e}")
-                my_statements_summary = "기본 논점"
-                opponent_statements_summary = "기본 논점"
-            
-            # 상대방 약점 분석 결과
-            weakness_section = ""
-            try:
-                if (opponent_analysis.get('contradictions') or 
-                    opponent_analysis.get('overused_arguments')):
-                    weakness_section = f"\n\n🎯 상대방 약점 분석:\n"
-                    if opponent_analysis.get('contradictions'):
-                        contradictions = opponent_analysis['contradictions'][:3]
-                        weakness_section += f"모순점: {', '.join(contradictions)}\n"
-                    if opponent_analysis.get('overused_arguments'):
-                        overused = opponent_analysis['overused_arguments'][:3]
-                        weakness_section += f"반복 논거: {', '.join(overused)}\n"
-            except Exception as e:
-                print(f"약점 분석 섹션 생성 실패: {e}")
-                weakness_section = ""
+        # 발언 기록 업데이트
+        self.update_statement_history(previous_statements)
+        
+        context = self._build_context(previous_statements)
 
-            # 프롬프트 생성
-            if round_number == 1:
-                prompt = f"""너는 더불어민주당 소속 진보 정치인이다.
+        ##### RAG #####
+        # 관련 기사 검색(진보 시각)
+        evidence_text = ""
+        if self.rag_system:
+            retrieved_docs = self.rag_system.search(query=topic, stance_filter="진보")
+            if retrieved_docs:
+                evidence_text = "\n".join(
+                    [f"- {doc['text']} (출처: {doc['source']})" for doc in retrieved_docs[:3]]
+                )
 
-토론 주제: {topic}{evidence_section}
+        # 공통적으로 프롬프트에 삽입
+        evidence_section = f"\n\n📚 참고 기사:\n{evidence_text}\n" if evidence_text else ""
+        ##### RAG #####
+
+        # 핵심 논점 기반 발언 기록 섹션 생성
+        my_key_args = self.get_my_key_arguments()
+        my_arguments_section = ""
+        if my_key_args:
+            my_arguments_text = ", ".join(my_key_args[:5])  # 최대 5개
+            my_arguments_section = f"\n\n📝 내가 강조한 핵심 논점들: {my_arguments_text}\n"
+
+        opponent_key_args = self.get_opponent_key_arguments()
+        opponent_arguments_section = ""
+        if opponent_key_args:
+            opponent_arguments_text = ", ".join(opponent_key_args[:5])  # 최대 5개
+            opponent_arguments_section = f"\n\n🔴 상대(보수)의 핵심 논점들: {opponent_arguments_text}\n"
+
+        # 일관성 위반 경고
+        consistency_warning = ""
+        if self.consistency_violations:
+            recent_violation = self.consistency_violations[-1]
+            consistency_warning = f"\n\n⚠️ 일관성 주의: 과거 '{recent_violation['conflicting']}'과 모순되지 않도록 주의하세요.\n"
+
+        # 근거 중복 방지 지침
+        evidence_guidelines = f"""
+📋 근거 사용 지침:
+- 상대방이 이미 사용한 통계, 사례, 정책은 피하세요
+- {self.stance} 관점의 독립적 자료를 활용하세요
+- 같은 기관 자료라도 다른 시점이나 다른 지표를 사용하세요
+- 근거의 출처를 명확히 구분하여 제시하세요
+"""
+
+        if round_number == 1:
+            prompt = f"""너는 더불어민주당 소속 진보 정치인이다.
+
+토론 주제: {topic}{evidence_section}{evidence_guidelines}
 
 먼저 다음 단계별로 논리적 사고를 진행하라:
 <thinking>
 1. 상황 분석: 현재 경제/사회 상황의 핵심 문제는 무엇인가?
-2. 근거 선택: 제공된 새로운 근거 중 가장 강력한 것은?
-3. 핵심 메시지: 국민들에게 전달할 차별화된 대안은?
-4. 감정적 호소: 공감을 얻을 수 있는 구체적 사례는?
+2. 근거 제시: 우리가 제시할 수 있는 데이터나 사례는?
+3. 핵심 메시지: 국민들에게 전달할 책임감 있는 대안은?
+4. 감정적 호소: 국민들의 공감을 얻을 수 있는 포인트는?
 </thinking>
 
-그 다음 정중한 호칭을 포함하되 과장 없이, 존댓말로 구체적 수치·사례로 현재 상황의 심각성을 제시하고, 정부나 보수 정책의 실패를 새로운 근거로 비판하며, 진보적 대안의 필요성을 분명히 밝힌 뒤 2~3문장으로 힘 있게 마무리하라.
+그 다음 정중한 호칭을 포함하되 과장 없이, 존댓말로 구체적 수치·사례로 현재 상황의 심각성을 제시하고, 정부나 보수 정책의 실패를 비판하며, 진보적 대안의 필요성을 분명히 밝힌 뒤 2~3문장으로 힘 있게 마무리하라.
 
 형식 제한: <thinking> 부분은 출력하지 말고, 줄바꿈 없이 단락 하나로만 작성하고, 목록·숫자·괄호 시작·하이픈·불릿·이모지·제목을 사용하지 마라. 발화자의 멘트만 출력하라."""
-            else:
-                last_conservative = self._get_last_conservative_statement_safe(previous_statements)
-                prompt = f"""너는 더불어민주당 소속 진보 정치인이다.
+        else:
+            last_conservative = self._get_last_conservative_statement(previous_statements)
+            
+            # 근거 중복 체크를 위한 임시 응답 생성
+            temp_prompt = f"""상대 주장 '{last_conservative}'에 대한 반박 논점 3가지를 간단히 나열하세요:"""
+            temp_response = self.generate_response(temp_prompt)
+            
+            # 근거 중복 확인
+            evidence_ok, evidence_warning = self.check_evidence_before_response(temp_response)
+            evidence_instruction = evidence_warning if not evidence_ok else evidence_guidelines
+            
+            prompt = f"""너는 더불어민주당 소속 진보 정치인이다.
 
 토론 주제: {topic}
-상대(보수)의 최근 주장: "{last_conservative}"{evidence_section}
-
-📝 내 과거 주요 논점: {my_statements_summary}
-🔴 상대 과거 주요 논점: {opponent_statements_summary}{weakness_section}
+상대(보수)의 최근 주장: "{last_conservative}"{evidence_section}{my_arguments_section}{opponent_arguments_section}{consistency_warning}{evidence_instruction}
 
 먼저 다음 단계별로 논리적 사고를 진행하라:
 <thinking>
-1. 상대 분석: 상대가 최근에 주장한 핵심과 허점은?
-2. 차별화: 내 과거 발언과 다른 새로운 각도는?
-3. 약점 공략: 상대의 모순점이나 반복 논거를 어떻게 공격할까?
-4. 신규 근거: 제공된 새로운 근거를 어떻게 활용할까?
-5. 반전 논리: 상대 논리를 뒤집을 수 있는 관점은?
+1. 상대 분석: 상대가 최근에 주장한 부분이 무엇인가?
+2. 과거 논점 검토: 내가 이미 강조한 핵심 논점과 어떻게 연결할 것인가?
+3. 상대 모순점 파악: 상대의 과거 논점과 현재 발언 사이의 모순이나 허점은?
+4. 약점 파악: 그들 주장의 허점이나 모순점은 무엇인가?
+5. 반박 근거: 우리가 제시할 수 있는 반증 데이터나 사례는?
+6. 진보 대안: 우리의 해결책이 왜 더 나은가?
+7. 일관성 확인: 내 과거 논점과 일치하는가?
 </thinking>
 
 중요한 제약사항:
-- 과거 논점과 겹치지 않는 새로운 각도로 접근하라
-- 상대의 약점과 모순점을 정확히 지적하라
-- 새로운 근거를 활용하여 차별화된 반박을 하라
-- 감정적이지만 논리적인 공격을 하라
+- 내가 과거에 강조한 핵심 논점들과 일관성을 유지하라
+- 상대의 최근 발언과 과거 핵심 논점을 모두 고려하여 정확한 반박을 하라
+- 새로운 각도에서 접근하되 기존 논점을 발전시켜라
+- 상대방이 이미 사용한 근거(통계, 사례, 정책)는 절대 사용하지 마라
+- 보수 관점의 독립적이고 차별화된 근거만 활용하라라
+- 상대방이 이미 사용한 근거(통계, 사례, 정책)는 절대 사용하지 마라
+- 진보 관점의 독립적이고 차별화된 근거만 활용하라
 
-그 다음 보수 측의 최근 주장을 정확히 파악하고 그 허점을 날카롭게 지적한 뒤, 존댓말로 새로운 구체적 데이터와 사례로 반증하고, 서민·중산층 관점에서 차별화된 대안을 제시하며 강력하게 마무리하라.
+그 다음 보수 측의 최근 주장을 정확히 요지 파악한 뒤, 존댓말로 구체적 데이터와 사례로 반증하고, 서민·중산층 관점에서 일관된 대안을 제시하며 공격적으로 마무리하라.
 
 형식 제한: <thinking> 부분과 보수 측 주장은 출력하지 말고, 목록·숫자·괄호 시작·하이픈·불릿·이모지·제목을 사용하지 마라. 발화자의 멘트만 출력하라."""
-            
-            response = self.generate_response(prompt)
-            
-            # 사용된 근거와 논거 기록
-            if response:
-                try:
-                    self.my_previous_statements.append(response)
-                    self.argument_tracker.add_argument(response)
-                    
-                    # 사용된 근거들 기록
-                    for doc in selected_docs:
-                        if doc and isinstance(doc, dict) and 'text' in doc and 'source' in doc:
-                            self.argument_tracker.add_evidence(doc['text'], doc['source'])
-                            if self.shared_tracker:
-                                self.shared_tracker.add_evidence(doc['text'], doc['source'])
-                except Exception as e:
-                    print(f"발언 기록 실패: {e}")
-            
-            return response if response else "죄송합니다. 일시적으로 응답을 생성할 수 없습니다."
-            
-        except Exception as e:
-            print(f"논증 생성 중 전체 오류: {e}")
-            return "죄송합니다. 시스템 오류로 인해 응답을 생성할 수 없습니다."
-
-    def _get_last_conservative_statement_safe(self, statements: List[Dict]) -> str:
-        """안전한 상대방 마지막 발언 추출"""
-        try:
-            if not statements:
-                return ""
-            
-            for stmt in reversed(statements):
-                if stmt and isinstance(stmt, dict) and stmt.get('stance') == '보수':
-                    statement = stmt.get('statement', '')
-                    return statement if statement else ""
-            return ""
-        except Exception as e:
-            print(f"상대방 발언 추출 실패: {e}")
-            return ""
-
-    def _summarize_previous_arguments(self, statements: List[str]) -> str:
-        """이전 발언들의 핵심 논점 요약"""
-        if not statements:
-            return "없음"
         
-        try:
-            # 최근 2개 발언의 핵심 키워드만 추출
-            recent_statements = statements[-2:] if len(statements) > 2 else statements
-            all_keywords = []
+        # 응답 생성
+        response = self.generate_response(prompt)
+        
+        # 일관성 및 근거 중복 검증
+        if response:
+            is_consistent, consistency_warning = self.check_consistency_before_response(response)
+            has_evidence_conflict, evidence_conflict_warning = self.check_evidence_before_response(response)
             
-            for stmt in recent_statements:
-                if stmt and len(stmt.strip()) > 0:
-                    keywords = self.argument_tracker._extract_keywords_safe(stmt)
-                    all_keywords.extend(keywords)
+            if not is_consistent:
+                print(f"[DEBUG 일관성] {consistency_warning}")
             
-            # 중복 제거하고 빈도순 정렬
-            keyword_freq = {}
-            for keyword in all_keywords:
-                if keyword and len(keyword.strip()) > 0:
-                    keyword_freq[keyword] = keyword_freq.get(keyword, 0) + 1
+            if has_evidence_conflict:
+                print(f"[DEBUG 근거중복] {evidence_conflict_warning}")
+                # 근거 중복이 발견된 경우 재생성 시도
+                retry_prompt = prompt + f"\n\n{evidence_conflict_warning}\n위 경고를 반영하여 다시 작성하세요:"
+                response = self.generate_response(retry_prompt)
             
-            top_keywords = sorted(keyword_freq.keys(), key=lambda x: keyword_freq[x], reverse=True)[:5]
-            return ", ".join(top_keywords) if top_keywords else "기본 논점"
-        except Exception as e:
-            print(f"발언 요약 중 오류: {e}")
-            return "기본 논점"
-
-    def update_statement_history(self, previous_statements: List[Dict]):
-        """발언 기록을 업데이트합니다."""
-        try:
-            self.my_previous_statements = []
-            self.opponent_previous_statements = []
-            
-            for stmt in previous_statements:
-                if stmt and isinstance(stmt, dict):
-                    if stmt.get('stance') == '진보':
-                        statement = stmt.get('statement', '')
-                        if statement and len(statement.strip()) > 0:
-                            self.my_previous_statements.append(statement)
-                    elif stmt.get('stance') == '보수':
-                        statement = stmt.get('statement', '')
-                        if statement and len(statement.strip()) > 0:
-                            self.opponent_previous_statements.append(statement)
-        except Exception as e:
-            print(f"발언 기록 업데이트 실패: {e}")
-
-    def get_my_previous_statements(self) -> List[str]:
-        """내가 과거에 한 발언들을 반환합니다."""
-        return self.my_previous_statements.copy()
-
-    def get_opponent_previous_statements(self) -> List[str]:
-        """상대가 과거에 한 발언들을 반환합니다."""
-        return self.opponent_previous_statements.copy()
+            # 새로운 발언을 기록에 추가 및 근거 추적
+            self.my_previous_statements.append(response)
+            self.evidence_tracker.record_used_evidence(response, self.stance)
+        
+        return response
 
     def _build_context(self, statements: List[Dict]) -> str:
         if not statements:
             return "첫 라운드입니다."
         
-        try:
-            recent_statements = statements[-2:] if len(statements) >= 2 else statements
-            context_parts = []
-            for stmt in recent_statements:
-                if stmt and isinstance(stmt, dict):
-                    stance = stmt.get('stance', '')
-                    content = stmt.get('statement', '')
-                    if content:
-                        content_preview = content[:50] + "..." if len(content) > 50 else content
-                        context_parts.append(f"{stance}: {content_preview}")
-            
-            return " | ".join(context_parts)
-        except Exception:
-            return "컨텍스트 생성 실패"
+        recent_statements = statements[-2:] if len(statements) >= 2 else statements
+        context_parts = []
+        for stmt in recent_statements:
+            stance = stmt.get('stance', '')
+            content = stmt.get('statement', '')[:50] + "..."
+            context_parts.append(f"{stance}: {content}")
+        
+        return " | ".join(context_parts)
+
+    def _get_last_conservative_statement(self, statements: List[Dict]) -> str:
+        for stmt in reversed(statements):
+            if stmt.get('stance') == '보수':
+                return stmt.get('statement', '')
+        return ""
 
     def process_input(self, input_data: Dict) -> str:
         """기존 인터페이스와의 호환성을 위한 메서드"""
-        try:
-            topic = input_data.get('topic', '')
-            round_number = input_data.get('round_number', 1)
-            previous_statements = input_data.get('previous_statements', [])
-            
-            return self.generate_argument(topic, round_number, previous_statements)
-        except Exception as e:
-            print(f"입력 처리 실패: {e}")
-            return "입력 처리 중 오류가 발생했습니다."
+        topic = input_data.get('topic', '')
+        round_number = input_data.get('round_number', 1)
+        previous_statements = input_data.get('previous_statements', [])
+        
+        return self.generate_argument(topic, round_number, previous_statements)
+
+    def get_memory_status(self) -> Dict:
+        """메모리 상태 정보 반환"""
+        return {
+            "my_statements_count": len(self.my_previous_statements),
+            "my_managed_count": len(self.my_managed_statements),
+            "opponent_managed_count": len(self.opponent_managed_statements),
+            "consistency_violations": len(self.consistency_violations),
+            "key_arguments": self.get_my_key_arguments(),
+            "used_evidence": list(self.evidence_tracker.used_evidence[self.stance]),
+            "opponent_evidence": list(self.evidence_tracker.used_evidence["보수"])
+        }
 
 class ConservativeAgent(BaseAgent):
-    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf', rag_system: Optional[RAGSystem] = None):
+    def __init__(self, model_path: str = 'C:/Users/User/Documents/EXAONE-4.0-32B-Q4_K_M.gguf', rag_system: Optional[RAGSystem] = None, evidence_tracker: Optional[EnhancedEvidenceTracker] = None):
         super().__init__(model_path)
         self.stance = "보수"
         self.rag_system = rag_system
+        self.memory_manager = StatementMemoryManager()
+        self.evidence_tracker = evidence_tracker or EnhancedEvidenceTracker()
+        
+        # 과거 발언 추적을 위한 저장소 (원본 + 관리된 버전)
         self.my_previous_statements = []
         self.opponent_previous_statements = []
+        self.my_managed_statements = []
+        self.opponent_managed_statements = []
         
-        # 중복 방지를 위한 추적기
-        self.argument_tracker = ArgumentTracker()
-        self.shared_tracker = None  # 공유 추적기
+        # 핵심 논점 추적
+        self.my_key_arguments = []
+        self.consistency_violations = []
         
+        # 실제 국민의힘 토론자(박수민)의 말투와 성향 반영
         self.system_prompt = """너는 국민의힘 소속 보수 정치인이다. 다음과 같은 특징을 가져라:
 
 말투 특징:
@@ -523,6 +706,7 @@ class ConservativeAgent(BaseAgent):
 - "이 점 말씀드리고..." 같은 체계적 설명
 - 책임감과 성찰을 보이는 표현 사용
 - 구체적 수치와 데이터를 활용한 실증적 접근
+- "보수적" 과 같은 직접적 말은 빼기
 
 정책 성향:
 - 시장경제와 민간 주도 성장 강조
@@ -554,566 +738,265 @@ class ConservativeAgent(BaseAgent):
 5. 대안 제시: 시장 원리 기반의 실현 가능한 해법은?
 </thinking>
 
-""" + SELF_CONSTRAINTS
+"""
 
-    def set_shared_tracker(self, shared_tracker: ArgumentTracker):
-        """상대방과 공유하는 추적기 설정"""
-        self.shared_tracker = shared_tracker
+    def update_statement_history(self, previous_statements: List[Dict]):
+        """발언 기록을 업데이트하고 메모리 관리"""
+        self.my_previous_statements = []
+        self.opponent_previous_statements = []
+        
+        for stmt in previous_statements:
+            statement_text = stmt.get('statement', '')
+            stance = stmt.get('stance', '')
+            
+            if stance == '보수':
+                self.my_previous_statements.append(statement_text)
+                # 내 발언의 근거를 기록
+                self.evidence_tracker.record_used_evidence(statement_text, '보수')
+            elif stance == '진보':
+                self.opponent_previous_statements.append(statement_text)
+                # 상대 발언의 근거를 기록
+                self.evidence_tracker.record_used_evidence(statement_text, '진보')
+        
+        # 메모리 관리 적용
+        if self.my_previous_statements:
+            self.my_managed_statements = self.memory_manager.manage_memory(
+                self.my_previous_statements, self)
+        
+        if self.opponent_previous_statements:
+            self.opponent_managed_statements = self.memory_manager.manage_memory(
+                self.opponent_previous_statements, self)
 
-    def _get_filtered_evidence(self, topic: str, max_docs: int = 5) -> List[Dict]:
-        """중복되지 않는 새로운 근거 검색"""
-        if not self.rag_system:
+    def check_evidence_before_response(self, potential_statement: str) -> Tuple[bool, str]:
+        """근거 중복을 사전에 확인"""
+        has_conflict, conflicting_items = self.evidence_tracker.check_evidence_conflict(
+            potential_statement, self.stance)
+        
+        if has_conflict:
+            warning = self.evidence_tracker.get_alternative_evidence_prompt(
+                conflicting_items, self.stance)
+            return False, warning
+        
+        return True, ""
+
+    def check_consistency_before_response(self, new_statement: str) -> Tuple[bool, str]:
+        """새 발언의 일관성을 검증"""
+        if not self.my_previous_statements:
+            return True, ""
+        
+        # 최근 3개 발언과 비교
+        recent_statements = self.my_previous_statements[-3:]
+        for past_stmt in recent_statements:
+            if self.memory_manager.detect_contradiction(new_statement, past_stmt, self):
+                warning = f"⚠️ 일관성 경고: 과거 발언 '{past_stmt[:50]}...'과 모순될 수 있습니다."
+                self.consistency_violations.append({
+                    "new": new_statement[:50],
+                    "conflicting": past_stmt[:50]
+                })
+                return False, warning
+        
+        return True, ""
+
+    def get_my_key_arguments(self) -> List[str]:
+        """내 핵심 논점들을 반환"""
+        if not self.my_managed_statements:
             return []
         
-        try:
-            all_docs = self.rag_system.search(query=topic, stance_filter="보수", top_k=max_docs*2)
-            filtered_docs = []
-            
-            for doc in all_docs:
-                if not doc or not isinstance(doc, dict):
-                    continue
-                    
-                evidence_text = doc.get('text', '')
-                source = doc.get('source', '')
-                
-                if self.argument_tracker.is_evidence_used(evidence_text):
-                    continue
-                if self.shared_tracker and self.shared_tracker.is_evidence_used(evidence_text):
-                    continue
-                if self.argument_tracker.is_source_overused(source):
-                    continue
-                    
-                filtered_docs.append(doc)
-                if len(filtered_docs) >= max_docs:
-                    break
-                    
-            return filtered_docs
-        except Exception as e:
-            print(f"근거 검색 중 오류: {e}")
+        return [stmt["summary"] for stmt in self.my_managed_statements 
+                if stmt.get("priority") in ["recent", "key_topic"]]
+    
+    def get_opponent_key_arguments(self) -> List[str]:
+        """상대 핵심 논점들을 반환"""
+        if not self.opponent_managed_statements:
             return []
-
-    def _analyze_opponent_weakness_safe(self, opponent_statements: List[str]) -> Dict:
-        """상대방 발언의 약점과 모순점 분석 (보수 관점, 안전한 버전)"""
-        # 기본 구조 초기화
-        analysis = {
-            'contradictions': [],
-            'weak_points': [],
-            'overused_arguments': [],
-            'missing_evidence': []
-        }
         
-        # 빈 리스트 체크
-        if not opponent_statements or len(opponent_statements) == 0:
-            return analysis
-        
-        try:
-            # 진보 측 모순점 찾기
-            contradiction_pairs = [
-                (['재정지출', '지출확대'], ['건전성', '재정건전성']),
-                (['규제강화', '강화'], ['경제성장', '성장률']),
-                (['복지확대', '복지증가'], ['세수부족', '재정부족']),
-            ]
-            
-            for stmt in opponent_statements:
-                if not stmt or len(stmt.strip()) == 0:
-                    continue
-                    
-                stmt_lower = stmt.lower()
-                
-                for pair in contradiction_pairs:
-                    left_keywords, right_keywords = pair
-                    
-                    # 각 그룹에서 키워드 발견 여부 확인
-                    left_found = any(keyword in stmt_lower for keyword in left_keywords)
-                    right_found = any(keyword in stmt_lower for keyword in right_keywords)
-                    
-                    if left_found and right_found:
-                        # 실제 발견된 키워드 찾기
-                        found_left = next((k for k in left_keywords if k in stmt_lower), left_keywords[0])
-                        found_right = next((k for k in right_keywords if k in stmt_lower), right_keywords[0])
-                        analysis['contradictions'].append(f"{found_left}와 {found_right} 모순")
-            
-            # 반복 논거 찾기
-            keyword_counts = {}
-            for stmt in opponent_statements:
-                if not stmt or len(stmt.strip()) == 0:
-                    continue
-                    
-                try:
-                    keywords = self.argument_tracker._extract_keywords_safe(stmt)
-                    for keyword in keywords:
-                        if keyword and len(keyword.strip()) > 0:
-                            keyword_counts[keyword] = keyword_counts.get(keyword, 0) + 1
-                except Exception:
-                    continue
-            
-            # 3번 이상 사용된 키워드를 반복 논거로 분류
-            overused = [k for k, v in keyword_counts.items() if v >= 3 and k]
-            analysis['overused_arguments'] = overused[:5]  # 최대 5개만
-            
-        except Exception as e:
-            print(f"상대방 약점 분석 중 오류: {e}")
-        
-        return analysis
+        return [stmt["summary"] for stmt in self.opponent_managed_statements 
+                if stmt.get("priority") in ["recent", "key_topic"]]
 
     def generate_argument(self, topic: str, round_number: int, previous_statements: List[Dict]) -> str:
-        """안전한 논증 생성 메서드"""
-        try:
-            self.update_statement_history(previous_statements)
-            
-            # 상대방 약점 분석
-            try:
-                opponent_analysis = self._analyze_opponent_weakness_safe(self.opponent_previous_statements)
-            except Exception as e:
-                print(f"상대방 분석 실패: {e}")
-                opponent_analysis = {
-                    'contradictions': [],
-                    'weak_points': [],
-                    'overused_arguments': [],
-                    'missing_evidence': []
-                }
-            
-            # 필터링된 근거 검색
-            try:
-                filtered_docs = self._get_filtered_evidence(topic)
-            except Exception as e:
-                print(f"근거 검색 실패: {e}")
-                filtered_docs = []
-            
-            # 근거 텍스트 생성
-            evidence_text = ""
-            selected_docs = []
-            if filtered_docs:
-                for doc in filtered_docs[:3]:
-                    try:
-                        if doc and isinstance(doc, dict) and 'text' in doc and 'source' in doc:
-                            evidence_text += f"- {doc['text']} (출처: {doc['source']})\n"
-                            selected_docs.append(doc)
-                    except Exception:
-                        continue
-            
-            evidence_section = f"\n\n📚 새로운 참고 기사:\n{evidence_text}" if evidence_text else ""
-            
-            # 과거 발언 요약
-            try:
-                my_statements_summary = self._summarize_previous_arguments(self.my_previous_statements)
-                opponent_statements_summary = self._summarize_previous_arguments(self.opponent_previous_statements)
-            except Exception as e:
-                print(f"발언 요약 실패: {e}")
-                my_statements_summary = "기본 논점"
-                opponent_statements_summary = "기본 논점"
-            
-            # 상대방 약점 분석 결과
-            weakness_section = ""
-            try:
-                if (opponent_analysis.get('contradictions') or 
-                    opponent_analysis.get('overused_arguments')):
-                    weakness_section = f"\n\n🎯 상대방 약점 분석:\n"
-                    if opponent_analysis.get('contradictions'):
-                        contradictions = opponent_analysis['contradictions'][:3]
-                        weakness_section += f"모순점: {', '.join(contradictions)}\n"
-                    if opponent_analysis.get('overused_arguments'):
-                        overused = opponent_analysis['overused_arguments'][:3]
-                        weakness_section += f"반복 논거: {', '.join(overused)}\n"
-            except Exception as e:
-                print(f"약점 분석 섹션 생성 실패: {e}")
-                weakness_section = ""
+        # 발언 기록 업데이트
+        self.update_statement_history(previous_statements)
+        
+        context = self._build_context(previous_statements)
 
-            if round_number == 1:
-                prompt = f"""너는 국민의힘 소속 보수 정치인이다.
+        ##### RAG #####
+        # 기사 검색 (보수 시각)
+        evidence_text = ""
+        if self.rag_system:
+            retrieved_docs = self.rag_system.search(query=topic, stance_filter="보수")
+            if retrieved_docs:
+                evidence_text = "\n".join(
+                    [f"- {doc['text']} (출처: {doc['source']})" for doc in retrieved_docs[:3]]
+                )
+        evidence_section = f"\n\n📚 참고 기사:\n{evidence_text}\n" if evidence_text else ""
+        ##### RAG #####
 
-토론 주제: {topic}{evidence_section}
+        # 핵심 논점 기반 발언 기록 섹션 생성
+        my_key_args = self.get_my_key_arguments()
+        my_arguments_section = ""
+        if my_key_args:
+            my_arguments_text = ", ".join(my_key_args[:5])  # 최대 5개
+            my_arguments_section = f"\n\n📝 내가 강조한 핵심 논점들: {my_arguments_text}\n"
+
+        opponent_key_args = self.get_opponent_key_arguments()
+        opponent_arguments_section = ""
+        if opponent_key_args:
+            opponent_arguments_text = ", ".join(opponent_key_args[:5])  # 최대 5개
+            opponent_arguments_section = f"\n\n🔵 상대(진보)의 핵심 논점들: {opponent_arguments_text}\n"
+
+        # 일관성 위반 경고
+        consistency_warning = ""
+        if self.consistency_violations:
+            recent_violation = self.consistency_violations[-1]
+            consistency_warning = f"\n\n⚠️ 일관성 주의: 과거 '{recent_violation['conflicting']}'과 모순되지 않도록 주의하세요.\n"
+
+        # 근거 중복 방지 지침
+        evidence_guidelines = f"""
+📋 근거 사용 지침:
+- 상대방이 이미 사용한 통계, 사례, 정책은 피하세요
+- {self.stance} 관점의 독립적 자료를 활용하세요
+- 같은 기관 자료라도 다른 시점이나 다른 지표를 사용하세요
+- 근거의 출처를 명확히 구분하여 제시하세요
+"""
+
+        if round_number == 1:
+            prompt = f"""너는 국민의힘 소속 보수 정치인이다.
+
+토론 주제: {topic}{evidence_section}{evidence_guidelines}
 
 먼저 다음 단계별로 논리적 사고를 진행하라:
 <thinking>
-1. 상황 분석: 현재 경제/사회 상황을 시장경제 관점에서 보면?
-2. 근거 선택: 제공된 새로운 근거 중 가장 설득력 있는 것은?
-3. 보수적 해법: 시장 원리와 재정건전성을 지키면서 해결할 방법은?
-4. 장기 비전: 국가 경쟁력과 미래 세대를 위한 책임은?
+1. 상황 분석: 현재 경제/사회 상황의 핵심 문제는 무엇인가?
+2. 근거 제시: 우리가 제시할 수 있는 구체적 데이터나 사례는?
+3. 보수적 관점: 시장경제와 재정건전성 관점에서 어떻게 바라보는가?
+4. 장기적 부작용: 진보 정책이 경제와 재정에 미칠 장기 영향은?
+5. 대안 제시: 시장 원리 기반의 실현 가능한 해법은?
 </thinking>
 
-그 다음 현 상황을 구체적 수치와 데이터로 냉정히 진단하고 존댓말로 우려를 밝힌 다음, 진보 정책의 문제점을 새로운 근거와 함께 지적하고, 시장경제·재정건전성의 중요성을 실증적 데이터로 강조하며 책임 있는 어조로 마무리하라.
+그 다음 현 상황을 구체적 수치와 데이터로 냉정히 진단하고 존댓말로 우려를 밝힌 다음, 진보 정책의 문제점을 경험적 근거와 함께 지적하고, 시장경제·재정건전성의 중요성을 실증적 데이터로 강조하며 책임 있는 어조로 마무리하라.
 
 형식 제한: <thinking> 부분은 출력하지 말고, 줄바꿈 없이 단락 하나로만 작성하고, 목록·숫자·괄호 시작·하이픈·불릿·이모지·제목을 절대 사용하지 마라. 발화자의 멘트만 출력하라."""
-            else:
-                last_progressive = self._get_last_progressive_statement_safe(previous_statements)
-                prompt = f"""너는 국민의힘 소속 보수 정치인이다.
+        else:
+            last_progressive = self._get_last_progressive_statement(previous_statements)
+            
+            # 근거 중복 체크를 위한 임시 응답 생성
+            temp_prompt = f"""상대 주장 '{last_progressive}'에 대한 반박 논점 3가지를 간단히 나열하세요:"""
+            temp_response = self.generate_response(temp_prompt)
+            
+            # 근거 중복 확인
+            evidence_ok, evidence_warning = self.check_evidence_before_response(temp_response)
+            evidence_instruction = evidence_warning if not evidence_ok else evidence_guidelines
+            
+            prompt = f"""너는 국민의힘 소속 보수 정치인이다.
 
 토론 주제: {topic}
-상대(진보)의 최근 주장: "{last_progressive}"{evidence_section}
-
-📝 내 과거 주요 논점: {my_statements_summary}
-🔵 상대 과거 주요 논점: {opponent_statements_summary}{weakness_section}
+상대(진보)의 최근 주장: "{last_progressive}"{evidence_section}{my_arguments_section}{opponent_arguments_section}{consistency_warning}{evidence_instruction}
 
 먼저 다음 단계별로 논리적 사고를 진행하라:
 <thinking>
-1. 상대방 주장 분석: 진보 측이 최근에 주장한 핵심과 문제점은?
-2. 차별화 전략: 내 과거 발언과 다른 새로운 보수적 관점은?
-3. 약점 공략: 상대의 모순점과 반복 논거를 어떻게 반박할까?
-4. 신규 근거 활용: 새로운 근거로 어떤 논리를 구성할까?
-5. 시장경제 원리: 자유시장과 개인책임 관점에서의 해법은?
-6. 장기적 관점: 재정건전성과 국가경쟁력 측면의 우려는?
+1. 상대방 주장 분석: 진보 측이 최근에 주장한 핵심 논리는 무엇인가?
+2. 과거 논점 검토: 내가 이미 강조한 핵심 논점과 어떻게 연결할 것인가?
+3. 상대 모순점 파악: 상대의 과거 논점과 현재 발언 사이의 모순이나 허점은?
+4. 근거 제시: 우리가 제시할 수 있는 구체적 데이터나 사례는?
+5. 장기적 부작용: 진보 정책이 경제와 재정에 미칠 장기 영향은?
+6. 대안 제시: 시장 원리 기반의 실현 가능한 해법은?
+7. 일관성 확인: 내 과거 논점과 일치하는가?
 </thinking>
 
 중요한 제약사항:
-- 과거 논점과 차별화된 새로운 보수적 각도로 접근하라
-- 상대의 약점과 모순을 구체적으로 지적하라
-- 새로운 근거를 바탕으로 설득력 있는 반박을 하라
-- 감정에 치우치지 않고 데이터 기반으로 논증하라
+- 내가 과거에 강조한 핵심 논점들과 일관성을 유지하라
+- 상대의 최근 발언과 과거 핵심 논점을 모두 고려하여 정확한 반박을 하라
+- 새로운 각도에서 접근하되 기존 논점을 발전시켜라
 
-그 다음 상대의 최근 주장을 존댓말로 논리적으로 반박하고, 구체적 수치와 새로운 경험적 데이터로 재정 부담·장기 부작용을 입증하며, 실증적 근거를 들어 차별화된 보수적 해법을 제시하고 존댓말이지만 강력하게 마무리하라.
+그 다음 상대의 최근 주장을 존댓말로 논리적으로 반박하고, 구체적 수치와 경험적 데이터로 재정 부담·장기 부작용을 입증하며, 실증적 근거를 들어 일관된 보수적 해법을 제시하고 존댓말이지만 공격적으로 마무리하라.
 
 형식 제한: <thinking> 부분과 진보 측 주장은 출력하지 말고, 목록·숫자·괄호 시작·하이픈·불릿·이모지·제목을 절대 사용하지 마라. 발화자의 멘트만 출력하라."""
-            
-            response = self.generate_response(prompt)
-            
-            # 사용된 근거와 논거 기록
-            if response:
-                try:
-                    self.my_previous_statements.append(response)
-                    self.argument_tracker.add_argument(response)
-                    
-                    # 사용된 근거들 기록
-                    for doc in selected_docs:
-                        if doc and isinstance(doc, dict) and 'text' in doc and 'source' in doc:
-                            self.argument_tracker.add_evidence(doc['text'], doc['source'])
-                            if self.shared_tracker:
-                                self.shared_tracker.add_evidence(doc['text'], doc['source'])
-                except Exception as e:
-                    print(f"발언 기록 실패: {e}")
-            
-            return response if response else "죄송합니다. 일시적으로 응답을 생성할 수 없습니다."
-            
-        except Exception as e:
-            print(f"논증 생성 중 전체 오류: {e}")
-            return "죄송합니다. 시스템 오류로 인해 응답을 생성할 수 없습니다."
-
-    def _get_last_progressive_statement_safe(self, statements: List[Dict]) -> str:
-        """안전한 상대방 마지막 발언 추출"""
-        try:
-            if not statements:
-                return ""
-            
-            for stmt in reversed(statements):
-                if stmt and isinstance(stmt, dict) and stmt.get('stance') == '진보':
-                    statement = stmt.get('statement', '')
-                    return statement if statement else ""
-            return ""
-        except Exception as e:
-            print(f"상대방 발언 추출 실패: {e}")
-            return ""
-
-    def _summarize_previous_arguments(self, statements: List[str]) -> str:
-        """이전 발언들의 핵심 논점 요약"""
-        if not statements:
-            return "없음"
         
-        try:
-            recent_statements = statements[-2:] if len(statements) > 2 else statements
-            all_keywords = []
+        # 응답 생성
+        response = self.generate_response(prompt)
+        
+        # 일관성 검증
+        if response:
+            is_consistent, warning = self.check_consistency_before_response(response)
+            if not is_consistent:
+                print(f"[DEBUG] {warning}")  # 개발용 로그
             
-            for stmt in recent_statements:
-                if stmt and len(stmt.strip()) > 0:
-                    keywords = self.argument_tracker._extract_keywords_safe(stmt)
-                    all_keywords.extend(keywords)
-            
-            keyword_freq = {}
-            for keyword in all_keywords:
-                if keyword and len(keyword.strip()) > 0:
-                    keyword_freq[keyword] = keyword_freq.get(keyword, 0) + 1
-            
-            top_keywords = sorted(keyword_freq.keys(), key=lambda x: keyword_freq[x], reverse=True)[:5]
-            return ", ".join(top_keywords) if top_keywords else "기본 논점"
-        except Exception as e:
-            print(f"발언 요약 중 오류: {e}")
-            return "기본 논점"
-
-    def update_statement_history(self, previous_statements: List[Dict]):
-        """발언 기록을 업데이트합니다."""
-        try:
-            self.my_previous_statements = []
-            self.opponent_previous_statements = []
-            
-            for stmt in previous_statements:
-                if stmt and isinstance(stmt, dict):
-                    if stmt.get('stance') == '보수':
-                        statement = stmt.get('statement', '')
-                        if statement and len(statement.strip()) > 0:
-                            self.my_previous_statements.append(statement)
-                    elif stmt.get('stance') == '진보':
-                        statement = stmt.get('statement', '')
-                        if statement and len(statement.strip()) > 0:
-                            self.opponent_previous_statements.append(statement)
-        except Exception as e:
-            print(f"발언 기록 업데이트 실패: {e}")
-
-    def get_my_previous_statements(self) -> List[str]:
-        """내가 과거에 한 발언들을 반환합니다."""
-        return self.my_previous_statements.copy()
-
-    def get_opponent_previous_statements(self) -> List[str]:
-        """상대가 과거에 한 발언들을 반환합니다."""
-        return self.opponent_previous_statements.copy()
+            # 새로운 발언을 기록에 추가
+            self.my_previous_statements.append(response)
+        
+        return response
 
     def _build_context(self, statements: List[Dict]) -> str:
         if not statements:
             return "첫 라운드입니다."
         
-        try:
-            recent_statements = statements[-2:] if len(statements) >= 2 else statements
-            context_parts = []
-            for stmt in recent_statements:
-                if stmt and isinstance(stmt, dict):
-                    stance = stmt.get('stance', '')
-                    content = stmt.get('statement', '')
-                    if content:
-                        content_preview = content[:50] + "..." if len(content) > 50 else content
-                        context_parts.append(f"{stance}: {content_preview}")
-            
-            return " | ".join(context_parts)
-        except Exception:
-            return "컨텍스트 생성 실패"
+        recent_statements = statements[-2:] if len(statements) >= 2 else statements
+        context_parts = []
+        for stmt in recent_statements:
+            stance = stmt.get('stance', '')
+            content = stmt.get('statement', '')[:50] + "..."
+            context_parts.append(f"{stance}: {content}")
+        
+        return " | ".join(context_parts)
+
+    def _get_last_progressive_statement(self, statements: List[Dict]) -> str:
+        for stmt in reversed(statements):
+            if stmt.get('stance') == '진보':
+                return stmt.get('statement', '')
+        return ""
 
     def process_input(self, input_data: Dict) -> str:
         """기존 인터페이스와의 호환성을 위한 메서드"""
-        try:
-            topic = input_data.get('topic', '')
-            round_number = input_data.get('round_number', 1)
-            previous_statements = input_data.get('previous_statements', [])
-            
-            return self.generate_argument(topic, round_number, previous_statements)
-        except Exception as e:
-            print(f"입력 처리 실패: {e}")
-            return "입력 처리 중 오류가 발생했습니다."
+        topic = input_data.get('topic', '')
+        round_number = input_data.get('round_number', 1)
+        previous_statements = input_data.get('previous_statements', [])
+        
+        return self.generate_argument(topic, round_number, previous_statements)
 
-# 토론 관리자 클래스 (두 에이전트 간 공유 추적기 설정)
-class DebateManager:
-    """토론 진행 및 중복 방지 관리 클래스"""
-    
-    def __init__(self, progressive_agent: ProgressiveAgent, conservative_agent: ConservativeAgent):
-        self.progressive_agent = progressive_agent
-        self.conservative_agent = conservative_agent
-        
-        # 공유 추적기 생성 및 설정
-        self.shared_tracker = ArgumentTracker()
-        self.progressive_agent.set_shared_tracker(self.shared_tracker)
-        self.conservative_agent.set_shared_tracker(self.shared_tracker)
-        
-        # 토론 기록
-        self.debate_history = []
-        
-        # 토론 상태 관리
-        self.round_count = 0
-        self.max_rounds = 5
-        self.topic = ""
-        self.statements = []
-    
-    def start_debate(self, topic: str):
-        """토론 시작"""
-        self.topic = topic
-        self.round_count = 0
-        self.debate_history = []
-        self.statements = []
-        print(f"📢 토론 주제: {topic}")
-        return {'topic': topic, 'status': 'started'}
-    
-    def proceed_round(self):
-        """한 라운드 진행"""
-        if self.round_count >= self.max_rounds:
-            return {'status': 'finished', 'message': '최대 라운드에 도달했습니다.'}
-        
-        self.round_count += 1
-        return self.conduct_round(self.topic, self.round_count)
-    
-    def get_debate_status(self) -> Dict:
-        """현재 토론 상태 반환"""
+    def get_memory_status(self) -> Dict:
+        """메모리 상태 정보 반환"""
         return {
-            'topic': self.topic,
-            'current_round': self.round_count,
-            'max_rounds': self.max_rounds,
-            'total_statements': len(self.statements),
-            'can_proceed': self.round_count < self.max_rounds
+            "my_statements_count": len(self.my_previous_statements),
+            "my_managed_count": len(self.my_managed_statements),
+            "opponent_managed_count": len(self.opponent_managed_statements),
+            "consistency_violations": len(self.consistency_violations),
+            "key_arguments": self.get_my_key_arguments()
         }
-    
-    def summarize_debate(self):
-        """토론 요약"""
-        summary = self.get_debate_summary()
-        return {
-            'summary': f"{self.round_count}라운드의 토론이 완료되었습니다.",
-            'statistics': summary
-        }
-    
-    def conduct_round(self, topic: str, round_number: int) -> Dict:
-        """한 라운드 토론 진행 (안전한 버전)"""
-        results = {}
-        
-        try:
-            # 진보 측 발언
-            print(f"🔵 진보 측 발언 생성 중...")
-            progressive_argument = self.progressive_agent.generate_argument(
-                topic, round_number, self.debate_history
-            )
-            
-            if progressive_argument:
-                prog_statement = {
-                    'round': round_number,
-                    'stance': '진보',
-                    'statement': progressive_argument,
-                    'timestamp': self._get_timestamp()
-                }
-                self.debate_history.append(prog_statement)
-                self.statements.append(prog_statement)
-                results['progressive'] = prog_statement
-                print(f"🔵 진보: {progressive_argument[:100]}...")
-        except Exception as e:
-            print(f"진보 측 발언 생성 실패: {e}")
-            results['progressive'] = {
-                'round': round_number,
-                'stance': '진보',
-                'statement': '죄송합니다. 발언 생성에 실패했습니다.',
-                'timestamp': self._get_timestamp()
-            }
-        
-        try:
-            # 보수 측 발언
-            print(f"🔴 보수 측 발언 생성 중...")
-            conservative_argument = self.conservative_agent.generate_argument(
-                topic, round_number, self.debate_history
-            )
-            
-            if conservative_argument:
-                cons_statement = {
-                    'round': round_number,
-                    'stance': '보수',
-                    'statement': conservative_argument,
-                    'timestamp': self._get_timestamp()
-                }
-                self.debate_history.append(cons_statement)
-                self.statements.append(cons_statement)
-                results['conservative'] = cons_statement
-                print(f"🔴 보수: {conservative_argument[:100]}...")
-        except Exception as e:
-            print(f"보수 측 발언 생성 실패: {e}")
-            results['conservative'] = {
-                'round': round_number,
-                'stance': '보수',
-                'statement': '죄송합니다. 발언 생성에 실패했습니다.',
-                'timestamp': self._get_timestamp()
-            }
-        
-        return results
-    
-    def get_debate_summary(self) -> Dict:
-        """토론 요약 정보 반환"""
-        try:
-            progressive_count = len([s for s in self.debate_history if s.get('stance') == '진보'])
-            conservative_count = len([s for s in self.debate_history if s.get('stance') == '보수'])
-            
-            return {
-                'total_rounds': self.round_count,
-                'progressive_statements': progressive_count,
-                'conservative_statements': conservative_count,
-                'used_evidence_count': len(self.shared_tracker.used_evidence),
-                'used_sources': list(self.shared_tracker.evidence_sources),
-                'keyword_usage': self.shared_tracker.keyword_usage,
-                'history': self.debate_history
-            }
-        except Exception as e:
-            print(f"토론 요약 생성 실패: {e}")
-            return {
-                'total_rounds': self.round_count,
-                'error': str(e)
-            }
-    
-    def reset_debate(self):
-        """토론 초기화"""
-        try:
-            self.debate_history = []
-            self.statements = []
-            self.round_count = 0
-            self.topic = ""
-            
-            self.shared_tracker = ArgumentTracker()
-            self.progressive_agent.set_shared_tracker(self.shared_tracker)
-            self.conservative_agent.set_shared_tracker(self.shared_tracker)
-            
-            # 각 에이전트의 개별 추적기도 초기화
-            self.progressive_agent.argument_tracker = ArgumentTracker()
-            self.conservative_agent.argument_tracker = ArgumentTracker()
-            
-            # 발언 기록도 초기화
-            self.progressive_agent.my_previous_statements = []
-            self.progressive_agent.opponent_previous_statements = []
-            self.conservative_agent.my_previous_statements = []
-            self.conservative_agent.opponent_previous_statements = []
-            
-            print("✅ 토론 초기화 완료")
-        except Exception as e:
-            print(f"토론 초기화 실패: {e}")
-    
-    def _get_timestamp(self):
-        """현재 시간 반환"""
-        try:
-            import datetime
-            return datetime.datetime.now().isoformat()
-        except Exception:
-            return "timestamp_error"
 
-# 사용 예시 및 호환성 함수
-def create_debate_system(model_path: str, rag_system: RAGSystem = None) -> DebateManager:
-    """토론 시스템 생성 함수"""
-    try:
-        progressive_agent = ProgressiveAgent(model_path, rag_system)
-        conservative_agent = ConservativeAgent(model_path, rag_system)
-        
-        return DebateManager(progressive_agent, conservative_agent)
-    except Exception as e:
-        print(f"토론 시스템 생성 실패: {e}")
-        raise
+# 사용 예제 및 테스트 함수
+def test_memory_management():
+    """메모리 관리 기능 테스트"""
+    
+    # 진보 에이전트 생성
+    progressive_agent = ProgressiveAgent()
+    
+    # 가상의 토론 기록
+    test_statements = [
+        {"stance": "진보", "statement": "재정정책을 대폭 확대해서 일자리를 늘려야 합니다."},
+        {"stance": "보수", "statement": "재정확대는 국가부채만 늘릴 뿐입니다."},
+        {"stance": "진보", "statement": "중소기업 지원금을 두 배로 늘려서 경제를 살려야 합니다."},
+        {"stance": "보수", "statement": "지원금보다는 규제완화가 우선입니다."},
+        {"stance": "진보", "statement": "복지예산을 확대해서 서민생활을 보장해야 합니다."},
+        {"stance": "보수", "statement": "복지확대는 재정건전성을 해칩니다."},
+    ]
+    
+    # 메모리 관리 테스트
+    progressive_agent.update_statement_history(test_statements)
+    
+    print("=== 메모리 관리 테스트 결과 ===")
+    status = progressive_agent.get_memory_status()
+    print(f"전체 발언 수: {status['my_statements_count']}")
+    print(f"관리된 발언 수: {status['my_managed_count']}")
+    print(f"핵심 논점들: {status['key_arguments']}")
+    
+    # 일관성 검증 테스트
+    test_new_statement = "재정정책은 축소해야 한다고 생각합니다."
+    is_consistent, warning = progressive_agent.check_consistency_before_response(test_new_statement)
+    print(f"\n=== 일관성 검증 테스트 ===")
+    print(f"새 발언: {test_new_statement}")
+    print(f"일관성: {'유지' if is_consistent else '위반'}")
+    if warning:
+        print(f"경고: {warning}")
 
-# main.py와의 호환성을 위한 기존 인터페이스
-class DebateManagerLegacy:
-    """기존 main.py와 호환되는 DebateManager"""
-    
-    def __init__(self, model_path: str):
-        try:
-            # RAG 시스템 없이 초기화
-            self.progressive_agent = ProgressiveAgent(model_path, None)
-            self.conservative_agent = ConservativeAgent(model_path, None)
-            self.debate_manager = DebateManager(self.progressive_agent, self.conservative_agent)
-            
-            # 기존 인터페이스를 위한 속성들
-            self.max_rounds = 3
-            self.round_count = 0
-            self.statements = []
-            
-        except Exception as e:
-            print(f"Legacy DebateManager 초기화 실패: {e}")
-            raise
-    
-    def start_debate(self, topic: str):
-        """토론 시작 (기존 인터페이스)"""
-        return self.debate_manager.start_debate(topic)
-    
-    def proceed_round(self):
-        """라운드 진행 (기존 인터페이스)"""
-        result = self.debate_manager.proceed_round()
-        
-        # 기존 인터페이스를 위한 속성 업데이트
-        self.round_count = self.debate_manager.round_count
-        self.statements = self.debate_manager.statements
-        
-        return result
-    
-    def get_debate_status(self):
-        """토론 상태 (기존 인터페이스)"""
-        status = self.debate_manager.get_debate_status()
-        status['can_proceed'] = self.round_count < self.max_rounds
-        return status
-    
-    def summarize_debate(self):
-        """토론 요약 (기존 인터페이스)"""
-        return self.debate_manager.summarize_debate()
-
-# main.py에서 사용할 수 있는 호환성 클래스
-DebateManager = DebateManagerLegacy  # 기존 main.py와 호환
+if __name__ == "__main__":
+    test_memory_management()

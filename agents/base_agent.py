@@ -44,7 +44,7 @@ class BaseAgent(ABC):
         print(f"🔄 32B 모델 응답 생성 시작... (완료될 때까지 대기)")
         
         try:
-            # 오류 방지용 템플릿
+            # 토크나이저가 있으면 사용, 없으면 간단한 템플릿
             if self.tokenizer:
                 try:
                     messages = [{"role": "user", "content": prompt}]
@@ -148,7 +148,7 @@ class BaseAgent(ABC):
             # [end of text] 토큰 제거
             result = result.replace("[end of text]", "").replace("[END OF TEXT]", "").strip()
             
-        
+            # 추가 정리
             if "User:" in result:
                 result = result.split("User:")[0].strip()
             
@@ -184,7 +184,7 @@ class BaseAgent(ABC):
             
         except Exception as e:
             print(f"⚠️ 응답 정리 오류: {e}")
-            return response  
+            return response  # 정리 실패 시 원본 반환
     
     @abstractmethod
     def process_input(self, input_data: Dict) -> str:
