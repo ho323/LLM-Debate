@@ -189,7 +189,7 @@ class EnhancedEvidenceTracker:
         return normalized
     
     def _to_vec(self, texts: List[str]) -> np.ndarray:
-        # 사전 학습 말고 on-the-fly로 벡터화: 비교 집합을 동시 변환
+        # 벡터화: 비교 집합을 동시 변환
         return self.vectorizer.fit_transform(texts)
 
     def calculate_similarity(self, text1: str, text2: str) -> float:
@@ -226,7 +226,7 @@ class EnhancedEvidenceTracker:
                         self.used_evidence[stance][normalized] = evidence_item
     
     def _find_similar_evidence(self, normalized: str, stance: str, category: str, threshold: float = 0.80) -> str:
-        # 비교 대상들이 이미 저장되어 있다면, 같은 벡터 공간으로 변환해야 함
+        # 비교 대상들이 이미 저장되어 있다면, 같은 벡터 공간으로 변환
         candidates = [(k, v) for k, v in self.used_evidence[stance].items() if v.category == category]
         if not candidates:
             return None
@@ -252,7 +252,7 @@ class EnhancedEvidenceTracker:
                     corpus = [normalized] + [k for k, _ in opp_candidates]
                     X = self._to_vec(corpus)
                     sims = cosine_similarity(X[0], X[1:])[0]
-                    if float(np.max(sims)) >= 0.78:  # TF-IDF는 임계값을 약간 낮추는 편이 실용적
+                    if float(np.max(sims)) >= 0.78:  # TF-IDF
                         conflicting_evidence.append(item)
         return (len(conflicting_evidence) > 0, conflicting_evidence)
     
@@ -484,8 +484,8 @@ class ProgressiveAgent(BaseAgent):
         if not self.my_previous_statements:
             return True, ""
         
-        # 최근 3개 발언과 비교
-        recent_statements = self.my_previous_statements[-3:]
+        # 최근 6개 발언과 비교
+        recent_statements = self.my_previous_statements[-6:]
         for past_stmt in recent_statements:
             if self.memory_manager.detect_contradiction(new_statement, past_stmt, self):
                 warning = f"⚠️ 일관성 경고: 과거 발언 '{past_stmt[:50]}...'과 모순될 수 있습니다."
