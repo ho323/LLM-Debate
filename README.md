@@ -3,6 +3,9 @@
 
 ## 📋 주요 기능
 
+<img width="1390" height="616" alt="image" src="https://github.com/user-attachments/assets/cc765f5e-38de-4f4c-ac26-6e72f0612443" />
+
+
 ### 🎭 AI 에이전트 기반 토론
 ```
 ┌─────────────────┐    토론    ┌─────────────────┐
