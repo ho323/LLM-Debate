@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>정치토론 (Public UI)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#f5f7fa;--surface:#fff;--text:#1f2937;--muted:#5c6773;
+      --primary:#0b3a71;--primary-ink:#0a2e59;--accent:#1c5cc5;
+      --border:#d5dde5;--shadow:0 1px 0 rgba(16,24,40,.02);
+      --radius:8px;--maxw:1200px;
+    }
+    *,*::before,*::after{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:"Noto Sans KR",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:18px;line-height:1.7;letter-spacing:.2px;color:var(--text);background:var(--bg)}
+    .site-header{background:#ebf0f7;border-bottom:1px solid var(--border)}
+    .site-header .inner{max-width:var(--maxw);margin:0 auto;padding:24px 20px;display:flex;align-items:center;gap:16px}
+    .brand-mark{width:40px;height:40px;border-radius:8px;border:1px solid var(--border);background:#fff;object-fit:contain;image-rendering:auto;display:inline-block}
+    .titles h1{font-size:40px;line-height:1.2;margin:0 0 6px 0;color:var(--primary-ink);font-weight:700;letter-spacing:.3px}
+    .titles p{margin:0;color:var(--muted);font-size:16px}
+    .container{max-width:var(--maxw);margin:0 auto;padding:24px 20px}
+    .search-wrap{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;display:flex;align-items:center;justify-content:center;gap:12px}
+    .search-wrap input[type="text"]{width:520px;font-size:18px;padding:12px 14px;border:1px solid var(--border);border-radius:6px;outline:none}
+    .search-wrap input[type="text"]:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(28,92,197,.15)}
+    .btn-primary{font-size:18px;padding:12px 20px;background:var(--primary);color:#fff;border:1px solid var(--primary);border-radius:6px;cursor:pointer}
+    .btn-primary:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(28,92,197,.2)}
+    #topicTitle{margin:18px 0 0 0;font-size:22px;font-weight:600;color:var(--primary-ink);text-align:center;display:none}
+    /* #subtitle{max-width:var(--maxw);margin:16px auto 0 auto;background:var(--primary);color:#fff;border:1px solid #09325f;border-radius:var(--radius);padding:12px 16px;font-size:17px;min-height:56px;display:flex;align-items:center;justify-content:center} */
+    #stage{opacity:1}
+    .panel-moderator{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:20px;margin-top:20px;text-align:center}
+    .grid-2{display:grid;grid-template-columns:1.5fr 1.5fr;gap:0;margin-top:20px}
+    .participant{
+      background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px}
+    .participant h3{
+      margin:0 0 12px 0;font-size:18px;font-weight:700;color:var(--primary-ink)}
+    .participant.progressive {
+      border-top: 4px solid #1b6db7;
+      border-right: none;            /* 👉 가운데 경계선 겹치지 않도록 */
+      border-radius: 8px 0 0 8px;    /* 왼쪽만 둥글게 */
+    }
+    .participant.conservative {
+      border-top: 4px solid #a64040;
+      border-left: none;
+      border-radius: 0 8px 8px 0;    /* 오른쪽만 둥글게 */
+    }
+
+
+    /* 🎯 영상과 이미지 모두 여백 없이 꽉 차게 (잘라냄) */
+    .participant video,
+    .participant img {
+      width: 100%;
+      height: 500px;
+      object-fit: cover;     /* 비율 유지 + 여백 없이 꽉 채우기, 넘치는 부분 잘림 */
+      border-radius: 6px;
+      display: block;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+    .panel-moderator {
+      background: #000;               /* 👉 배경 검정색 */
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+      margin-top: 20px;
+      text-align: center;
+    }
+    .panel-moderator video {
+      width: 100%;
+      height: auto;
+      max-height: 600px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #000;               /* 영상 여백도 검정 */
+    }
+
+        /* 요약 버튼 */
+    .summary-btn {
+      display: none;
+      margin: 32px auto 0 auto;
+      padding: 14px 28px;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: .2px;
+      color: #fff;
+      background: linear-gradient(180deg,#0f3f79 0%,#0b3263 100%);
+      border: 1px solid #092a50;
+      border-radius: 999px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08),
+                  0 6px 18px rgba(8,28,58,.18);
+      transition: box-shadow .2s ease, transform .15s ease, filter .2s ease;
+      cursor: pointer;
+      align-items: center;
+      gap: 10px;
+    }
+    .summary-btn svg {width: 18px;height: 18px;flex: 0 0 auto}
+    .summary-btn:focus-visible {
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08),
+                  0 0 0 3px rgba(28,92,197,.20),
+                  0 6px 18px rgba(8,28,58,.2);
+    }
+    .summary-btn:hover {
+      filter: saturate(1.05);
+      transform: translateY(-2px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08),
+                  0 10px 24px rgba(8,28,58,.22);
+    }
+    .summary-btn:active {
+      transform: translateY(0);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08),
+                  0 4px 14px rgba(8,28,58,.18);
+    }
+
+    /* 요약 박스 컨테이너 */
+    .summary-container {
+      display: none;
+      margin-top: 32px;
+      padding: 0 8px;
+    }
+
+    /* 요약 카드 */
+    .summary-card {
+      background: #fff;
+      border: 1px solid #d5dde5;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.08);
+      padding: 28px 32px;
+      max-width: var(--maxw);
+      margin: 0 auto;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .summary-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(0,0,0,.12);
+    }
+
+    /* 요약 제목 */
+    .summary-card h3 {
+      margin: 0 0 16px 0;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--primary-ink);
+      border-left: 4px solid var(--accent);
+      padding-left: 10px;
+    }
+
+    /* 요약 본문 */
+    .summary-card p {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.65;
+      color: var(--text);
+      text-align: justify;
+    }
+      
+    
+    .participant p,.panel-moderator p{margin:12px 0 0 0;color:var(--text);font-size:18px}
+    @media (max-width:900px){
+      .search-wrap{flex-direction:column}
+      .search-wrap input[type="text"]{width:100%}
+      .grid-2,.summary-grid{grid-template-columns:1fr}
+      video,.participant img{height:240px}
+      .media-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 21 / 9;
+  height: 500px;
+  overflow: hidden;
+}
+.media-wrap video,
+.media-wrap img {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #000;
+  top: 0;
+  left: 0;
+  transition: opacity 0.4s ease; /* 부드러운 전환 */
+}
+.media-wrap video.hide,
+.media-wrap img.hide {
+  opacity: 0;
+}
+
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header" role="banner">
+    <div class="inner">
+      <img class="brand-mark" src="logo.jpg" alt="기관 로고" loading="eager" decoding="async" />
+      <div class="titles">
+        <h1>정치 토론</h1>
+        <p>본 의견은 기사를 기반으로 LLM이 생성한 의견이며, 특정 인물의 의견과는 무관합니다.</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="container" role="main">
+    <div id="searchBox" class="search-wrap" aria-label="토론 주제 입력 영역">
+      <input type="text" id="topicInput" placeholder="토론 주제를 입력하세요" aria-label="토론 주제 입력" />
+      <button type="button" class="btn-primary" id="startBtn">토론 진행</button>
+    </div>
+
+    <h2 id="topicTitle"></h2>
+
+    <div id="stage" class="stage"></div>
+    <div id="subtitle" aria-live="polite"></div>
+
+    <button id="summaryBtn" class="summary-btn" aria-label="요약 보기">
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path fill="currentColor" d="M12 5c-4.97 0-9 3.58-10 7 1 3.42 5.03 7 10 7s9-3.58 10-7c-1-3.42-5.03-7-10-7zm0 12a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/>
+      </svg>
+      <span>요약 보기</span>
+    </button>
+
+    <section id="summaryBox" class="summary-container">
+      <div class="summary-card" role="region" aria-label="토론 요약">
+        <h3>요약</h3>
+        <p> 이번 토론에서 진보 측은 경제 위기 시 정부의 적극적 개입이 서민과 중산층 보호를 위해 필수적이라 주장한 반면, 보수 측은 단기적 효과에도 불구하고 장기적 재정 적자와 국가 신용 악화 를 우려하며 시장 주도의 회복을 강조했다. 양측 모두 국가채무 증가 문제를 언급했으나, 진보는 국제 기준 내 관리 가능성을, 보수는 지속 가능성의 위험성을 각각 강조했다.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const progress = [
+  {role:"사회자", text:[
+    "안녕하세요, 귀중한 시간을 내어 오늘 이 자리에 함께해 주신 모든 분들께 진심으로 감사드립니다.",
+    "민생경제 회복은 우리 사회가 직면한 가장 시급하고 중요한 과제 중 하나이며, 이에 대한 심도 있는 논의는 정책의 방향성을 모색하고 미래를 준비하는 데 필수적입니다.",
+    "오늘 이 토론에서는 정부의 역할과 정책 방향에 대해 다양한 관점을 나누고자 합니다.",
+    "양측의 토론자분들께서는 각자의 전문성과 통찰력을 바탕으로 건설적인 의견을 제시해 주실 것으로 기대합니다.",
+    "저는 중립적인 입장에서 공정하고 품격 있는 토론이 이루어질 수 있도록 최선을 다하겠습니다.",
+    "이제 본격적으로 토론을 시작하겠습니다."
+  ], timings:[6.5,13,6,9,5,4], video:"facevideo/사회자1_h264.mp4", duration:20},
+
+  {role:"진보", text:[
+    "국민 여러분, 현재 우리 경제는 높은 물가와 임대료, 임금 정체로 인해 서민과 중산층의 삶이 극도로 어려운 상황입니다.",
+    "2023년 소비자물가 상승률은 3.6%로 10년 만에 최고치를 기록했고, 청년 실업률은 7.8%로 여전히 높은 수준입니다.",
+    "특히 소득 하위 20% 가구의 가처분소득은 전년 대비 4.5% 감소해 경제적 불평등이 심화되고 있습니다.",
+    "정부의 기존 정책들은 대기업 중심 성장에 치중하며 서민 경제 회복에는 실패했습니다.",
+    "더불어민주당은 중소기업·소상공인 지원 확대, 공공주택 10만 호 추가 공급, 최저임금 인상, 비정규직 보호 강화를 통해 민생경제를 회복시키겠습니다.",
+    "국민 여러분의 삶이 나아지는 것이 최고의 정책 성과입니다."
+  ], timings:[5.0, 3.2, 9, 5, 6.9, 10.1, 3], video:"facevideo/진보1_h264.mp4", duration:25},
+
+  {role:"보수", text:[
+    "현재 우리 경제는 고물가와 고금리로 인한 소비 위축, 청년 실업률 증가, 기업 투자 감소 등 복합적 문제에 직면해 있습니다.",
+    "2023년 소비자물가지수는 전년 대비 4.7% 상승했고, 청년 실업률은 6.8%로 여전히 높습니다.",
+    "중소기업 중앙은행 조사에 따르면 55%가 경기 악화를 우려하며 투자를 줄이고 있다고 답했습니다.",
+    "이런 상황에서 정부의 과도한 재정 지출과 규제 강화는 시장 기능을 저해하고 장기적으로 재정 건전성을 훼손할 수 있습니다.",
+    "과거 보조금 정책은 정부 부채를 GDP 대비 50% 이상으로 급증시켰으며 이는 미래 세대에 부담을 안겼습니다.",
+    "따라서 우리는 규제 완화와 세금 감면, 노동시장 유연성을 통한 민간 주도 성장을 추진하겠습니다."
+  ], timings:[10.5,9,8,12,11,11], video:"facevideo/보수1_h264.mp4", duration:25},
+
+  {role:"진보", text:[
+    "상대 측은 경제 위기를 이유로 정부의 역할을 축소하려 하지만 이는 서민과 중산층의 고통을 외면하는 것입니다.",
+    "공식 통계보다 훨씬 높은 생활비 부담, 특히 주거비와 교육비는 평균보다 2배 이상 상승했습니다.",
+    "규제 완화와 세금 감면이 기업 경쟁력을 높인다는 논리는 지난 10년간 데이터로 설득력이 없습니다.",
+    "노동시장 유연성 확대는 청년 일자리를 늘리지 못한 채 비정규직만 증가시켰습니다.",
+    "우리는 주거비·교육비 등 필수재 가격 안정화, 중소기업 맞춤형 지원, 공공부문 일자리 확대, 직업훈련 강화로 대응하겠습니다.",
+    "정부의 적극적 역할 없이는 복합 위기를 해결할 수 없습니다."
+  ], timings:[12,9,10,8,13,8], video:"facevideo/진보2_h264.mp4", duration:25},
+
+  {role:"보수", text:[
+    "상대 측의 적극적 개입은 장기적으로 재정 적자를 확대해 국가 신용등급을 떨어뜨립니다.",
+    "2023년 국가채무는 GDP 대비 54%로 사상 최고치를 기록했습니다.",
+    "가격 안정화 정책은 공급 부족을 심화시킬 수 있으며, 2017년 주거비 지원 정책 후 전세가가 18% 상승한 사례가 있습니다.",
+    "중소기업 지원의 34%가 부실 기업에 집행된 것도 문제입니다.",
+    "노동시장 유연성을 거부하는 것은 청년 실업을 악화시킬 뿐이며, OECD 평균 대비 2배 높은 수준입니다.",
+    "우리는 시장 친화적 규제 개혁과 투자 유인을 강화해 지속 가능한 성장을 추진하겠습니다."
+  ], timings:[9,7,13,7,12,11], video:"facevideo/보수2_h264.mp4", duration:25},
+
+  {role:"진보", text:[
+    "국가채무 우려는 과장됐습니다. 코로나 위기 속에서도 IMF는 재정 확대를 권고했으며, 한국의 국가채무는 선진국 평균보다 낮습니다.",
+    "2017년 전세 가격 상승은 투기 수요와 저금리 영향이 컸습니다. 정부는 25차례 대책으로 시장을 안정시켰습니다.",
+    "중소기업 지원 효과는 뚜렷합니다. 2023년 성과평가에 따르면 생산성 12% 향상, 고용 8만 개 증가가 있었습니다.",
+    "노동시장 유연성과 청년 실업률 관계는 단순하지 않습니다. 미국은 유연성이 높지만 청년 실업률은 7.9%로 한국보다 높습니다.",
+    "우리는 필수재 가격 상한제, 중소기업 디지털 전환 펀드 확대, 청년 공공부문 채용 목표제를 통해 경제 회복을 이끌겠습니다."
+  ], timings:[14,12,12,13,14], video:"facevideo/진보3_h264.mp4", duration:25},
+
+  {role:"보수", text:[
+    "국가채무는 장기적으로 재정 건전성을 훼손할 수 있습니다. 5년 내 60%를 넘어설 전망입니다.",
+    "가격 상한제는 공급 부족을 초래한다는 역사적 경험이 있습니다.",
+    "중소기업 지원 성과는 상위 기업에만 집중되었고, 하위 기업은 오히려 생산성이 감소했습니다.",
+    "노동시장 유연성과 청년 실업률 관계는 단순하지 않지만, 상대 측 주장은 사실을 왜곡합니다.",
+    "우리는 규제 완화, 중소기업 혁신 지원, 직업훈련 확대를 통해 민생경제 회복을 추진하겠습니다.",
+    "상대 측의 정책은 단기적 포퓰리즘에 불과합니다."
+  ], timings:[10,7,9,9,11,6], video:"facevideo/보수3_h264.mp4", duration:25},
+
+  {role:"사회자", text:[
+    "수고 많으셨습니다.",
+    "오늘 토론에서 진보 측과 보수 측 모두 열정적인 논의를 통해 다양한 관점과 정책 대안을 제시해 주셨습니다.",
+    "양측의 노고와 진지한 태도에 감사드리며, 이러한 건설적인 대화가 사회 발전에 기여할 것이라 믿습니다.",
+    "오늘 제시된 의견은 국민 여러분의 현명한 판단에 도움이 될 것입니다.",
+    "앞으로도 계속된 대화와 협력을 기대합니다.",
+    "마지막으로 시청해주신 모든 분들께 감사드립니다."
+  ], timings:[2,13,11,10,6,6], video:"facevideo/사회자2_h264.mp4", duration:20}
+];
+
+
+    let stageIndex = 0;
+    let sentenceIndex = 0;
+    let sentenceTimer;
+    let stageTimer;
+    let soundOn = true; // 모든 영상 소리 켜서 자동재생 시도
+
+
+    function renderStage(){
+      const current = progress[stageIndex];
+      const container = document.getElementById("stage");
+      const subtitle = document.getElementById("subtitle");
+      container.innerHTML = "";
+      const mutedAttr = soundOn ? '' : 'muted';
+
+      // 👉 자막 색상 동적 변경
+      if(current.role === "보수"){
+        subtitle.style.background = "#a64040";     // 붉은색
+      } else if(current.role === "진보"){
+        subtitle.style.background = "#1b6db7";     // 파란색
+      } else if(current.role === "사회자"){
+        subtitle.style.background = "#333333";     // 진한 회색
+      } else {
+        subtitle.style.background = "var(--primary)"; // 기본값
+      }
+
+      if(current.role === "사회자"){
+        container.innerHTML = `
+          <section class="panel-moderator">
+            <video autoplay ${mutedAttr} playsinline>
+              <source src="${current.video}" type="video/mp4">
+            </video>
+          </section>`;
+      } else {
+        // 고정된 블럭 안에 media-wrap을 만들어서 영상/이미지 교체
+        container.innerHTML = `
+          <section class="grid-2">
+            <div class="participant progressive">
+              <h3>진보</h3>
+              <div class="media-wrap" id="block-progressive"></div>
+            </div>
+            <div class="participant conservative">
+              <h3>보수</h3>
+              <div class="media-wrap" id="block-conservative"></div>
+            </div>
+          </section>`;
+
+        if(current.role === "진보"){
+          document.getElementById("block-progressive").innerHTML =
+            `<video autoplay ${mutedAttr} playsinline><source src="${current.video}" type="video/mp4"></video>`;
+          document.getElementById("block-conservative").innerHTML =
+            `<img src="kiiiiiiim.png" alt="보수 인물">`;
+        } else if(current.role === "보수"){
+          document.getElementById("block-conservative").innerHTML =
+            `<video autoplay ${mutedAttr} playsinline><source src="${current.video}" type="video/mp4"></video>`;
+          document.getElementById("block-progressive").innerHTML =
+            `<img src="leeeeeeee.png" alt="진보 인물">`;
+        }
+      }
+
+      // 비디오 재생 및 종료 시 마지막 프레임 유지
+      const vids = container.querySelectorAll('video');
+      vids.forEach(v => {
+        v.muted = !soundOn ? true : false;
+        const p = v.play();
+        if (p && p.catch) {
+          p.catch(() => { v.muted = true; v.play(); });
+        }
+
+        // 영상 끝난 뒤 마지막 프레임 캡처 → 이미지로 교체
+        // 비디오 끝난 뒤 마지막 프레임 캡처 → 이미지로 부드럽게 교체
+        v.addEventListener("ended", () => {
+          nextStage();
+        //   const canvas = document.createElement("canvas");
+        //   canvas.width = v.videoWidth;
+        //   canvas.height = v.videoHeight;
+        //   const ctx = canvas.getContext("2d");
+        //   ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        //   const imgURL = canvas.toDataURL("image/png");
+
+        //   // 새 이미지 생성
+        //   const img = document.createElement("img");
+        //   img.src = imgURL;
+        //   img.style.opacity = "0";
+        //   v.parentNode.appendChild(img);
+
+        //   // 조금 늦게 opacity 올려서 fade-in
+        //   requestAnimationFrame(() => {
+        //     img.style.opacity = "1";
+        //     v.classList.add("hide"); // 기존 video는 fade-out
+        //   });
+        //         // 🎯 영상 끝나면 바로 다음 블록 실행
+        // setTimeout(() => {
+        //   nextStage();
+        // }, 500); // 0.5초 정도 텀 두고 자연스럽게 전환
+        });
+      });
+
+    //   // 자막 관련 코드 //
+    //   const DEFAULT_SUB_SEC = 4;
+    //   const sentences = Array.isArray(current.text)
+    //     ? current.text
+    //     : String(current.text).split(/(?<=[.?!])\s+/);
+
+    //   const timings = Array.isArray(current.timings) ? current.timings : [];
+    //   let i = 0;
+    //   clearTimeout(sentenceTimer);
+
+    //   function step() {
+    //     subtitle.textContent = sentences[i] || "";
+    //     const delaySec = Number(timings[i] ?? DEFAULT_SUB_SEC);
+    //     i++;
+
+    //     if (i < sentences.length) {
+    //       sentenceTimer = setTimeout(step, delaySec * 1000);
+    //     } else {
+    //       sentenceTimer = setTimeout(nextStage, delaySec * 1000);
+    //     }
+    //   }
+    // step();
+     }
+
+
+    function nextStage(){
+      stageIndex++;
+      if(stageIndex < progress.length){
+        renderStage();
+      } else if (stageIndex === progress.length) {
+          clearTimeout(stageTimer);
+          clearInterval(sentenceTimer);
+          document.getElementById("summaryBtn").style.display = "inline-flex";
+        } else {
+          // 그 외에는 절대 버튼 노출 안 함
+          document.getElementById("summaryBtn").style.display = "none";
+        }
+      }
+      
+    function scheduleNext(durationSec){
+      clearTimeout(stageTimer);
+      const delay = Number(durationSec) * 1000;
+      if(!isFinite(delay) || delay <= 0) return;
+      stageTimer = setTimeout(nextStage, delay);
+    }
+
+    function startDebate(){
+      soundOn = true; // 사용자 제스처 시점에 소리 재생 허용
+      clearTimeout(stageTimer);
+      clearInterval(sentenceTimer);
+      stageIndex = 0;
+      sentenceIndex = 0;
+
+      document.getElementById("summaryBox").style.display = "none";
+      document.getElementById("summaryBtn").style.display = "none";
+
+      const topic = document.getElementById("topicInput").value.trim();
+      const h2 = document.getElementById("topicTitle");
+      const searchBox = document.getElementById("searchBox");
+
+      if(!topic) return;
+      h2.textContent = topic;
+      h2.style.display = "block";
+      searchBox.style.display = "none";
+
+      renderStage();
+    }
+
+    document.getElementById("startBtn").addEventListener("click", startDebate);
+    document.getElementById("topicInput").addEventListener("keydown", (e) => {
+      if(e.key === "Enter") startDebate();
+    });
+    document.getElementById("summaryBtn").addEventListener("click", () => {
+      document.getElementById("summaryBox").style.display = "block";
+      document.getElementById("summaryBtn").style.display = "none";
+    });
+  </script>
+</body>
+</html>
